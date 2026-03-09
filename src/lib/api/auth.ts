@@ -1,0 +1,133 @@
+import { supabase } from "../supabase";
+import type { UserRow, UserRole } from "../types/database";
+
+/** Turn Supabase auth errors into a short, user-friendly message (including rate limit). */
+export function getAuthErrorMessage(err: unknown, fallback: string): string {
+  const raw =
+    err instanceof Error
+      ? err.message
+      : typeof (err as { message?: string })?.message === "string"
+        ? (err as { message: string }).message
+        : "";
+  const lower = raw.toLowerCase();
+  if (lower.includes("rate limit") || lower.includes("rate_limit") || lower.includes("email rate limit exceeded")) {
+    return "Too many emails sent. Please wait an hour and try again, or sign in if you already have an account.";
+  }
+  if (lower.includes("for security purposes") && lower.includes("once every")) {
+    return "Please wait a minute before requesting another email.";
+  }
+  return raw.trim() || fallback;
+}
+
+/** Get current user profile from public.users by auth.uid(). Call after Supabase Auth sign-in. */
+export async function getCurrentUserProfile(): Promise<UserRow | null> {
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  if (!authUser?.id) return null;
+
+  const { data, error } = await supabase.from("users").select("*").eq("id", authUser.id).maybeSingle();
+  if (error) throw error;
+  return data as UserRow | null;
+}
+
+/** Get current user profile plus interest names (for app context). */
+export async function getCurrentUserWithInterests(): Promise<{ profile: UserRow; interests: string[] } | null> {
+  const profile = await getCurrentUserProfile();
+  if (!profile) return null;
+  const { getUserInterestNames } = await import("./userInterests");
+  const interests = await getUserInterestNames(profile.id);
+  return { profile, interests };
+}
+
+/** Create or update user profile after sign-up. Sync from auth.users or form. */
+export async function upsertUserProfile(params: {
+  id: string;
+  email: string;
+  name?: string;
+  role?: UserRole;
+  avatar?: string | null;
+  gender?: string | null;
+}) {
+  const { data, error } = await supabase
+    .from("users")
+    .upsert(
+      {
+        id: params.id,
+        email: params.email,
+        name: params.name ?? params.email.split("@")[0],
+        role: params.role ?? "free",
+        avatar: params.avatar ?? null,
+        gender: params.gender ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    )
+    .select()
+    .single();
+  if (error) throw error;
+  return data as UserRow;
+}
+
+/** Sign up with email/password and create profile in public.users. */
+export async function signUp(
+  email: string,
+  password: string,
+  options?: { name?: string; role?: UserRole; interests?: string[] }
+) {
+  const name = options?.name ?? email.split("@")[0];
+  const { data: authData, error: authError } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { name } },
+  });
+  if (authError) throw authError;
+  if (authData.user) {
+    await upsertUserProfile({
+      id: authData.user.id,
+      email: authData.user.email!,
+      name: name ?? authData.user.user_metadata?.name ?? authData.user.email?.split("@")[0],
+      role: options?.role ?? "free",
+    });
+    // Save interests only if we have a session (e.g. email confirmation off). Don't fail signup if this fails.
+    if (options?.interests?.length) {
+      try {
+        const { setUserInterests } = await import("./userInterests");
+        await setUserInterests(authData.user.id, options.interests);
+      } catch {
+        // RLS may block when session isn't set yet (e.g. confirm email required). Interests can be set later.
+      }
+    }
+  }
+  return authData;
+}
+
+/** Sign in with email/password. */
+export async function signIn(email: string, password: string) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+/** Sign out. */
+export async function signOut() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}
+
+/** Get user by id (e.g. for display). */
+export async function getUserById(id: string): Promise<UserRow | null> {
+  const { data, error } = await supabase.from("users").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data as UserRow | null;
+}
+
+/** Upgrade current user to premium (demo: no payment). RLS allows users to update own row. */
+export async function upgradeToPremium(userId: string): Promise<UserRow> {
+  const { data, error } = await supabase
+    .from("users")
+    .update({ role: "premium", updated_at: new Date().toISOString() })
+    .eq("id", userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as UserRow;
+}
