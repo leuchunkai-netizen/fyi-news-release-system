@@ -8,7 +8,7 @@ import { useGuestLanding } from "../context/GuestLandingContext";
 import { useTestimonials } from "../context/TestimonialsContext";
 import { getPublishedArticles, getFeaturedArticles } from "@/lib/api";
 import type { ArticleWithCategory } from "@/lib/api/articles";
-import { Link } from "react-router";
+import { Link, useParams } from "react-router";
 import { Star } from "lucide-react";
 
 const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1622223145461-271074da3e20?w=1080";
@@ -28,6 +28,9 @@ function mapArticleToCard(a: ArticleWithCategory) {
 }
 
 export function HomePage() {
+  const { category } = useParams<{ category?: string }>();
+  const activeCategorySlug = category ?? "all";
+
   const { user } = useUser();
   const { introSlides, videoSection } = useGuestLanding();
   const { approvedTestimonials } = useTestimonials();
@@ -41,7 +44,7 @@ export function HomePage() {
     let cancelled = false;
     setLoading(true);
     setDbError(null);
-    getPublishedArticles({ limit: 10 })
+    getPublishedArticles({ limit: 10, categorySlug: activeCategorySlug })
       .then((list) => {
         if (!cancelled) setDbArticles(list.map(mapArticleToCard));
       })
@@ -61,7 +64,7 @@ export function HomePage() {
       })
       .catch(() => { /* featured is optional; keep featuredFromDb empty */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [activeCategorySlug]);
 
   const scrollToSection = useCallback((sectionId: string) => {
     const element = document.getElementById(sectionId);
@@ -122,32 +125,7 @@ export function HomePage() {
         </div>
       )}
 
-      {/* User Role Demo Switcher - for wireframe demonstration */}
-      {!user && (
-        <div className="p-6 bg-blue-50 border border-blue-200 rounded-lg">
-          <h3 className="font-semibold mb-2">Demo: Quick Login (Wireframe Only)</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            Try different user roles to see different features:
-          </p>
-          <div className="flex gap-2 flex-wrap">
-            <Link to="/login?demo=guest" className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700">
-              Continue as Guest
-            </Link>
-            <Link to="/login?demo=free" className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-              Demo Free User
-            </Link>
-            <Link to="/login?demo=premium" className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700">
-              Demo Premium User
-            </Link>
-            <Link to="/login?demo=expert" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-              Demo Expert User
-            </Link>
-            <Link to="/login?demo=admin" className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700">
-              Demo Admin User
-            </Link>
-          </div>
-        </div>
-      )}
+      {/* User Role Demo Switcher - removed for production */}
 
       {/* Featured / Intro section: intro slides for guests, breaking news for logged-in users */}
       <div id="featured-section" className="mb-12">

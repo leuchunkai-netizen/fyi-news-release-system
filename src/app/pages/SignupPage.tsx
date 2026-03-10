@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useUser } from "../context/UserContext";
 import { signUp, getCurrentUserWithInterests, getAuthErrorMessage } from "@/lib/api/auth";
@@ -6,7 +6,7 @@ import { Check } from "lucide-react";
 
 export function SignupPage() {
   const navigate = useNavigate();
-  const { setUser } = useUser();
+  const { user, setUser } = useUser();
   const [step, setStep] = useState(1);
   const [accountType, setAccountType] = useState<"free" | "premium">("free");
   const [formData, setFormData] = useState({
@@ -40,6 +40,13 @@ export function SignupPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // If the user is already registered/logged in, prevent access to the signup page.
+  useEffect(() => {
+    if (user) {
+      navigate("/", { replace: true });
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

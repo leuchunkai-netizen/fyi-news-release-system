@@ -1,4 +1,5 @@
 import { TrendingUp } from "lucide-react";
+import { Link } from "react-router";
 
 interface TrendingItem {
   rank: number;
@@ -41,13 +42,13 @@ export function Sidebar({ trendingArticles }: SidebarProps) {
         <h2 className="text-lg font-bold mb-4 pb-2 border-b-2 border-black">CATEGORIES</h2>
         <div className="space-y-2">
           {["World", "Politics", "Business", "Technology", "Sports", "Science", "Culture", "Opinion"].map((category) => (
-            <a
+            <Link
               key={category}
-              href="#"
+              to={`/category/${category.toLowerCase()}`}
               className="block py-2 border-b hover:font-bold transition-all"
             >
               {category}
-            </a>
+            </Link>
           ))}
         </div>
       </div>

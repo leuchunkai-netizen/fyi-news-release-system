@@ -1,4 +1,4 @@
-import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle } from "lucide-react";
+import { Clock, Sparkles, Flag, CheckCircle } from "lucide-react";
 import { Link } from "react-router";
 import { useUser } from "../context/UserContext";
 
@@ -58,25 +58,13 @@ export function ArticleCard({
               {title}
             </h3>
           </Link>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>{author}</span>
-              <span>•</span>
-              <div className="flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                <span>{time}</span>
-              </div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>{author}</span>
+            <span>•</span>
+            <div className="flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              <span>{time}</span>
             </div>
-            {user && user.role === "premium" && (
-              <div className="flex gap-2">
-                <button className="text-muted-foreground hover:text-red-600">
-                  <Bookmark className="w-4 h-4" />
-                </button>
-                <button className="text-muted-foreground hover:text-blue-600">
-                  <Share2 className="w-4 h-4" />
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </article>
@@ -114,25 +102,13 @@ export function ArticleCard({
         <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
           {excerpt}
         </p>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>By {author}</span>
-            <span>•</span>
-            <div className="flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              <span>{time}</span>
-            </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>By {author}</span>
+          <span>•</span>
+          <div className="flex items-center gap-1">
+            <Clock className="w-3 h-3" />
+            <span>{time}</span>
           </div>
-          {user && user.role === "premium" && (
-            <div className="flex gap-2">
-              <button className="text-muted-foreground hover:text-red-600">
-                <Bookmark className="w-4 h-4" />
-              </button>
-              <button className="text-muted-foreground hover:text-blue-600">
-                <Share2 className="w-4 h-4" />
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </article>
