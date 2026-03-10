@@ -23,6 +23,8 @@ export interface Database {
           role: UserRole;
           avatar: string | null;
           gender: string | null;
+          location: string | null;
+          website: string | null;
           status: UserStatus;
           email_verified_at: string | null;
           created_at: string;
@@ -35,6 +37,8 @@ export interface Database {
           role?: UserRole;
           avatar?: string | null;
           gender?: string | null;
+          location?: string | null;
+          website?: string | null;
           status?: UserStatus;
           email_verified_at?: string | null;
           created_at?: string;

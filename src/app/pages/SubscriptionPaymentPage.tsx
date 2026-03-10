@@ -35,6 +35,10 @@ export function SubscriptionPaymentPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isUpdateMode = user?.role === "premium" || searchParams.get("update") === "1";
+  const plan = (searchParams.get("plan") === "yearly" ? "yearly" : "monthly") as "monthly" | "yearly";
+  const planLabel =
+    plan === "yearly" ? "Premium (Yearly) · $59.88/year (equiv. $4.99/month)" : "Premium · $9.99/month";
+  const ctaLabel = plan === "yearly" ? "Subscribe — $59.88/year" : "Subscribe — $9.99/month";
   const [form, setForm] = useState({
     cardNumber: "",
     expiry: "",
@@ -150,7 +154,7 @@ export function SubscriptionPaymentPage() {
             {isUpdateMode ? "Update payment method" : "Complete your subscription"}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {isUpdateMode ? "Change the card we use for your Premium billing." : "Premium · $9.99/month"}
+            {isUpdateMode ? "Change the card we use for your Premium billing." : planLabel}
           </p>
           <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
             <Lock className="w-4 h-4" />
@@ -238,7 +242,7 @@ export function SubscriptionPaymentPage() {
             disabled={submitting}
             className="w-full py-3 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? "Processing…" : isUpdateMode ? "Update payment method" : "Subscribe — $9.99/month"}
+            {submitting ? "Processing…" : isUpdateMode ? "Update payment method" : ctaLabel}
           </button>
 
           <p className="text-xs text-muted-foreground text-center">

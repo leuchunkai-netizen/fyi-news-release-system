@@ -126,7 +126,7 @@ export function SubscriptionPage() {
               </Link>
             ) : user.role === "free" ? (
               <Link
-                to="/subscription/checkout"
+                to="/subscription/checkout?plan=monthly"
                 className="block w-full px-4 py-2 bg-red-600 text-white text-center rounded-lg hover:bg-red-700"
               >
                 Upgrade Now
@@ -146,7 +146,62 @@ export function SubscriptionPage() {
           )}
         </div>
 
-        {/* Only Free and Premium plans are offered */}
+        {/* Premium Yearly Plan */}
+        <div className="border rounded-lg p-8 relative">
+          <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 px-4 py-1 bg-yellow-500 text-white text-sm rounded-full">
+            Best Value
+          </div>
+          <h3 className="text-2xl font-semibold mb-2">Premium (Yearly)</h3>
+          <div className="mb-2">
+            <span className="text-4xl font-bold">$4.99</span>
+            <span className="text-muted-foreground">/month</span>
+          </div>
+          <p className="text-sm text-muted-foreground mb-6">
+            Billed yearly · <span className="font-medium text-gray-900">$59.88</span>/year
+          </p>
+          <ul className="space-y-3 mb-8">
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <span className="text-sm font-semibold">All Premium features, plus:</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <span className="text-sm">Save 50% vs monthly billing</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <span className="text-sm">One payment per year</span>
+            </li>
+          </ul>
+          {user ? (
+            user.role === "premium" ? (
+              <Link
+                to="/profile"
+                className="block w-full px-4 py-2 bg-gray-600 text-white text-center rounded-lg hover:bg-gray-700"
+              >
+                Current plan · Manage in Profile
+              </Link>
+            ) : user.role === "free" ? (
+              <Link
+                to="/subscription/checkout?plan=yearly"
+                className="block w-full px-4 py-2 bg-yellow-500 text-white text-center rounded-lg hover:bg-yellow-600"
+              >
+                Upgrade Yearly — $59.88/year
+              </Link>
+            ) : (
+              <span className="block w-full px-4 py-2 bg-gray-200 text-gray-600 text-center rounded-lg">
+                {user.role === "expert" ? "Expert account" : user.role === "admin" ? "Admin account" : "Current plan"}
+              </span>
+            )
+          ) : (
+            <Link
+              to="/signup"
+              className="block w-full px-4 py-2 bg-yellow-500 text-white text-center rounded-lg hover:bg-yellow-600"
+            >
+              Sign up to get Premium Yearly
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Testimonials */}

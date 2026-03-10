@@ -10,6 +10,7 @@ export interface User {
   role: UserRole;
   avatar?: string;
   gender?: string;
+  location?: string;
   interests?: string[];
 }
 
@@ -22,7 +23,18 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-function profileToUser(profile: { id: string; name: string; email: string; role: UserRole; avatar?: string | null; gender?: string | null }, interests: string[]): User {
+function profileToUser(
+  profile: {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole;
+    avatar?: string | null;
+    gender?: string | null;
+    location?: string | null;
+  },
+  interests: string[]
+): User {
   return {
     id: profile.id,
     name: profile.name,
@@ -30,6 +42,7 @@ function profileToUser(profile: { id: string; name: string; email: string; role:
     role: profile.role,
     avatar: profile.avatar ?? undefined,
     gender: profile.gender ?? undefined,
+    location: profile.location ?? undefined,
     interests: interests.length ? interests : undefined,
   };
 }

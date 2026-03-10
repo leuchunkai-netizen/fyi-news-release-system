@@ -25,8 +25,7 @@ export function ProfilePage() {
   const [formData, setFormData] = useState({
     name: user?.name || "",
     email: user?.email || "",
-    location: "",
-    website: "",
+    location: user?.location || "",
     gender: user?.gender || "",
     interests: (user?.interests || []) as string[]
   });
@@ -52,6 +51,7 @@ export function ProfilePage() {
         name: user.name,
         email: user.email,
         gender: user.gender || "",
+        location: user.location || "",
         interests: user.interests || [],
       }));
     }
@@ -81,6 +81,7 @@ export function ProfilePage() {
         email: formData.email,
         name: formData.name,
         gender: formData.gender || null,
+        location: formData.location || null,
       });
       if (formData.interests.length) {
         await setUserInterests(user.id, formData.interests);
@@ -94,6 +95,7 @@ export function ProfilePage() {
           role: data.profile.role as "guest" | "free" | "premium" | "expert" | "admin",
           avatar: data.profile.avatar ?? undefined,
           gender: data.profile.gender ?? undefined,
+          location: (data.profile as { location?: string | null }).location ?? undefined,
           interests: data.interests.length ? data.interests : undefined,
         });
       }
@@ -344,18 +346,6 @@ export function ProfilePage() {
                     disabled={!isEditing}
                     className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 disabled:bg-gray-50"
                     placeholder="City, Country"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Website</label>
-                  <input
-                    type="url"
-                    value={formData.website}
-                    onChange={(e) => setFormData({ ...formData, website: e.target.value })}
-                    disabled={!isEditing}
-                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 disabled:bg-gray-50"
-                    placeholder="https://..."
                   />
                 </div>
 

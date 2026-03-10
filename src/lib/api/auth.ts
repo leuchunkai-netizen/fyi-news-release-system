@@ -46,21 +46,35 @@ export async function upsertUserProfile(params: {
   role?: UserRole;
   avatar?: string | null;
   gender?: string | null;
+  location?: string | null;
 }) {
+  const payload: {
+    id: string;
+    email: string;
+    name: string;
+    role?: UserRole;
+    avatar: string | null;
+    gender: string | null;
+    location: string | null;
+    updated_at: string;
+  } = {
+    id: params.id,
+    email: params.email,
+    name: params.name ?? params.email.split("@")[0],
+    avatar: params.avatar ?? null,
+    gender: params.gender ?? null,
+    location: params.location ?? null,
+    updated_at: new Date().toISOString(),
+  };
+
+  // Only send role when explicitly provided so existing role is not reset to "free"
+  if (params.role) {
+    payload.role = params.role;
+  }
+
   const { data, error } = await supabase
     .from("users")
-    .upsert(
-      {
-        id: params.id,
-        email: params.email,
-        name: params.name ?? params.email.split("@")[0],
-        role: params.role ?? "free",
-        avatar: params.avatar ?? null,
-        gender: params.gender ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "id" }
-    )
+    .upsert(payload, { onConflict: "id" })
     .select()
     .single();
   if (error) throw error;
