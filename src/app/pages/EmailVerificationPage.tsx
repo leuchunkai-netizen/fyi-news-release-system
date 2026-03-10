@@ -20,7 +20,7 @@ export function EmailVerificationPage() {
 
         <button
           type="button"
-          onClick={() => navigate("/personal-info")}
+          onClick={() => navigate("/profile")}
           className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
         >
           I&apos;ve verified my email

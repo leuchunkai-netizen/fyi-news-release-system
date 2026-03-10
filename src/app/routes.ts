@@ -15,7 +15,6 @@ import { SearchPage } from "./pages/SearchPage";
 import { BookmarksPage } from "./pages/BookmarksPage";
 import { SubmitTestimonialPage } from "./pages/SubmitTestimonialPage";
 import { EmailVerificationPage } from "./pages/EmailVerificationPage";
-import { PersonalInfoPage } from "./pages/PersonalInfoPage";
 
 export const router = createBrowserRouter([
   {
@@ -26,7 +25,6 @@ export const router = createBrowserRouter([
       { path: "login", Component: LoginPage },
       { path: "signup", Component: SignupPage },
       { path: "verify-email", Component: EmailVerificationPage },
-      { path: "personal-info", Component: PersonalInfoPage },
       { path: "subscription", Component: SubscriptionPage },
       { path: "subscription/checkout", Component: SubscriptionPaymentPage },
       { path: "article/:id", Component: ArticleDetailPage },
