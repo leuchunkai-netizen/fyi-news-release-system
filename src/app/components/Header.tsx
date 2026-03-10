@@ -87,10 +87,12 @@ export function Header() {
           <button className="lg:hidden">
             <Menu className="w-6 h-6" />
           </button>
-          <Link to="/">
-            <div className="px-6 py-3 border-2 border-black">
-              <h1 className="text-2xl font-bold">LOGO</h1>
-            </div>
+          <Link to="/" className="flex items-center gap-3">
+            <img
+              src="/logo.png"
+              alt="Mediaworks logo"
+              className="h-20 w-auto md:h-22"
+            />
           </Link>
           {/* Search - Only for registered users (free, premium, expert, admin) */}
           {user ? (

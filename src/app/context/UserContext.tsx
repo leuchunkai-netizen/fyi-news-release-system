@@ -63,6 +63,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     await authSignOut();
     setUser(null);
+    // Redirect to login page after logout to match admin/logout flow diagrams.
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
   };
 
   return (

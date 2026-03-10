@@ -20,7 +20,7 @@ export function LoginPage() {
       await signIn(email, password);
       const data = await getCurrentUserWithInterests();
       if (data) {
-        setUser({
+        const nextUser = {
           id: data.profile.id,
           name: data.profile.name,
           email: data.profile.email,
@@ -28,9 +28,14 @@ export function LoginPage() {
           avatar: data.profile.avatar ?? undefined,
           gender: data.profile.gender ?? undefined,
           interests: data.interests.length ? data.interests : undefined,
-        });
+        };
+        setUser(nextUser);
+        // Redirect admins directly to the admin dashboard; others go to home.
+        navigate(nextUser.role === "admin" ? "/admin" : "/");
+      } else {
+        // Fallback: no profile loaded, go home.
+        navigate("/");
       }
-      navigate("/");
     } catch (err: unknown) {
       setError(getAuthErrorMessage(err, "Invalid email or password."));
     } finally {
