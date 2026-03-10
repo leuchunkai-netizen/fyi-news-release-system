@@ -74,27 +74,43 @@ export async function signUp(
   options?: { name?: string; role?: UserRole; interests?: string[] }
 ) {
   const name = options?.name ?? email.split("@")[0];
+  const redirectTo =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/verify-email`
+      : undefined;
+
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { name } },
+    options: {
+      data: { name },
+      // Ensure Supabase/Resend email links redirect back into the SPA
+      emailRedirectTo: redirectTo,
+    },
   });
   if (authError) throw authError;
   if (authData.user) {
-    await upsertUserProfile({
-      id: authData.user.id,
-      email: authData.user.email!,
-      name: name ?? authData.user.user_metadata?.name ?? authData.user.email?.split("@")[0],
-      role: options?.role ?? "free",
-    });
-    // Save interests only if we have a session (e.g. email confirmation off). Don't fail signup if this fails.
-    if (options?.interests?.length) {
-      try {
-        const { setUserInterests } = await import("./userInterests");
-        await setUserInterests(authData.user.id, options.interests);
-      } catch {
-        // RLS may block when session isn't set yet (e.g. confirm email required). Interests can be set later.
+    // When email confirmation is required, there may not be a session yet,
+    // so RLS can block writes to public.users. Never fail signup because
+    // the profile insert/upsert is unauthorized – it can be created later.
+    try {
+      await upsertUserProfile({
+        id: authData.user.id,
+        email: authData.user.email!,
+        name: name ?? authData.user.user_metadata?.name ?? authData.user.email?.split("@")[0],
+        role: options?.role ?? "free",
+      });
+      // Save interests only if we have a session (e.g. email confirmation off). Don't fail signup if this fails.
+      if (options?.interests?.length) {
+        try {
+          const { setUserInterests } = await import("./userInterests");
+          await setUserInterests(authData.user.id, options.interests);
+        } catch {
+          // RLS may block when session isn't set yet (e.g. confirm email required). Interests can be set later.
+        }
       }
+    } catch {
+      // Ignore profile upsert errors at signup time (e.g. 401/403 from RLS).
     }
   }
   return authData;
