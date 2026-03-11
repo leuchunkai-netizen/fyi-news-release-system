@@ -1,6 +1,7 @@
 import { Search, Menu, User, LogOut, Settings, Upload, BookMarked, Shield, LayoutDashboard } from "lucide-react";
 import { Link } from "react-router";
 import { useUser } from "../context/UserContext";
+import { UserAvatar } from "./UserAvatar";
 
 export function Header() {
   const { user, logout } = useUser();
@@ -32,7 +33,7 @@ export function Header() {
                 </span>
                 <div className="relative group">
                   <button className="flex items-center gap-2">
-                    <User className="w-4 h-4" />
+                    <UserAvatar avatar={user.avatar} name={user.name} size="sm" />
                   </button>
                   <div className="absolute right-0 top-full mt-2 w-48 bg-white border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
                     <Link to="/profile" className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100">

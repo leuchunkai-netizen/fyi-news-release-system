@@ -6,6 +6,8 @@ import { upsertUserProfile, getCurrentUserWithInterests } from "../../lib/api/au
 import { setUserInterests } from "../../lib/api/userInterests";
 import { submitExpertApplication } from "../../lib/api/expertApplications";
 import { supabase } from "../../lib/supabase";
+import { UserAvatar } from "../components/UserAvatar";
+import { PROFILE_PHOTO_OPTIONS } from "../../lib/profilePhotos";
 
 const EXPERTISE_LABELS: Record<string, string> = {
   medicine: "Medicine & Healthcare",
@@ -43,6 +45,8 @@ export function ProfilePage() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [expertSubmitting, setExpertSubmitting] = useState(false);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [avatarSaving, setAvatarSaving] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -133,6 +137,40 @@ export function ProfilePage() {
     }
   };
 
+  const handleChooseProfilePhoto = async (avatarPath: string) => {
+    if (!user) return;
+    setAvatarSaving(true);
+    try {
+      await upsertUserProfile({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        avatar: avatarPath,
+        gender: user.gender ?? null,
+        location: user.location ?? null,
+      });
+      const data = await getCurrentUserWithInterests();
+      if (data) {
+        setUser({
+          id: data.profile.id,
+          name: data.profile.name,
+          email: data.profile.email,
+          role: data.profile.role as "guest" | "free" | "premium" | "expert" | "admin",
+          avatar: data.profile.avatar ?? undefined,
+          gender: data.profile.gender ?? undefined,
+          location: (data.profile as { location?: string | null }).location ?? undefined,
+          interests: data.interests.length ? data.interests : undefined,
+        });
+      }
+      setShowAvatarPicker(false);
+      alert("Profile photo updated!");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update photo.");
+    } finally {
+      setAvatarSaving(false);
+    }
+  };
+
   const handleCancelSubscription = async () => {
     if (!user) return;
     try {
@@ -182,7 +220,7 @@ export function ProfilePage() {
             {/* Profile Card */}
             <div className="border rounded-lg p-6">
               <div className="text-center mb-4">
-                <div className="w-24 h-24 bg-gray-300 rounded-full mx-auto mb-4" />
+                <UserAvatar avatar={user.avatar} name={user.name} size="lg" className="mx-auto mb-4" />
                 <h2 className="font-semibold">{user.name}</h2>
                 <p className="text-sm text-muted-foreground">{user.email}</p>
                 {user.gender && (
@@ -212,7 +250,11 @@ export function ProfilePage() {
                   )}
                 </div>
               </div>
-              <button className="w-full px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+              <button
+                type="button"
+                onClick={() => setShowAvatarPicker(true)}
+                className="w-full px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm"
+              >
                 Change Photo
               </button>
             </div>
@@ -578,6 +620,54 @@ export function ProfilePage() {
                   className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
                 >
                   Yes, Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Profile photo picker modal */}
+        {showAvatarPicker && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg p-8 max-w-md w-full">
+              <h2 className="text-xl font-semibold mb-2">Choose profile photo</h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                Select one of the photos below. It will be used as your avatar across the site.
+              </p>
+              <div className="grid grid-cols-4 gap-3 mb-6">
+                {PROFILE_PHOTO_OPTIONS.map((path, index) => (
+                  <button
+                    key={path}
+                    type="button"
+                    disabled={avatarSaving}
+                    onClick={() => handleChooseProfilePhoto(path)}
+                    className={`rounded-full overflow-hidden border-2 transition focus:outline-none focus:ring-2 focus:ring-red-600 ${
+                      user?.avatar === path
+                        ? "border-red-600 ring-2 ring-red-600"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="relative w-full aspect-square bg-gray-200 flex items-center justify-center">
+                      <span className="text-gray-500 text-lg font-medium">{index + 1}</span>
+                      <img
+                        src={path}
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowAvatarPicker(false)}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
                 </button>
               </div>
             </div>

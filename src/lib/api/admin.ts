@@ -220,9 +220,12 @@ export async function updateUserRole(userId: string, role: UserRole) {
   if (error) throw error;
 }
 
-/** Update article status or delete (admin only). */
+/** Update article status (admin only). Uses a DB function to bypass RLS. */
 export async function updateArticleStatus(articleId: string, status: "published" | "rejected" | "flagged") {
-  const { error } = await supabase.from("articles").update({ status }).eq("id", articleId);
+  const { error } = await supabase.rpc("update_article_status_admin", {
+    p_article_id: articleId,
+    p_status: status,
+  });
   if (error) throw error;
 }
 

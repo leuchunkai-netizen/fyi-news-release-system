@@ -140,18 +140,24 @@ export function AdminDashboard() {
     }
   };
 
-  const handleArticleAction = async (articleId: string, action: "suspend" | "delete") => {
+  const handleArticleAction = async (articleId: string, action: "suspend" | "unsuspend" | "delete") => {
     try {
       if (action === "delete") {
         await deleteArticle(articleId);
         setArticles((prev) => prev.filter((a) => a.id !== articleId));
         alert("Article deleted.");
+      } else if (action === "unsuspend") {
+        await updateArticleStatus(articleId, "published");
+        setArticles((prev) =>
+          prev.map((a) => (a.id === articleId ? { ...a, status: "published" } : a))
+        );
+        alert("Article unsuspended and published again.");
       } else {
         await updateArticleStatus(articleId, "flagged");
         setArticles((prev) =>
           prev.map((a) => (a.id === articleId ? { ...a, status: "flagged" } : a))
         );
-        alert("Article flagged.");
+        alert("Article suspended.");
       }
     } catch (err) {
       alert((err as Error)?.message ?? "Action failed.");
@@ -356,7 +362,7 @@ export function AdminDashboard() {
               }`}
             >
               <MessageSquare className="w-4 h-4 inline mr-2" />
-              Comments
+              Comment Moderation
             </button>
             <button
               onClick={() => setActiveTab("categories")}
@@ -367,7 +373,7 @@ export function AdminDashboard() {
               }`}
             >
               <Tag className="w-4 h-4 inline mr-2" />
-              Categories
+              Category Management
             </button>
             <button
               onClick={() => setActiveTab("experts")}
@@ -512,7 +518,9 @@ export function AdminDashboard() {
                         className={`px-2 py-1 rounded text-xs ${
                           article.status === "published"
                             ? "bg-green-100 text-green-700"
-                            : "bg-orange-100 text-orange-700"
+                            : article.status === "flagged"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-orange-100 text-orange-700"
                         }`}
                       >
                         {article.status}
@@ -520,13 +528,22 @@ export function AdminDashboard() {
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">{article.date}</td>
                     <td className="px-6 py-4">
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleArticleAction(article.id, "suspend")}
-                          className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700"
-                        >
-                          Suspend
-                        </button>
+                      <div className="flex gap-2 flex-wrap">
+                        {article.status === "flagged" ? (
+                          <button
+                            onClick={() => handleArticleAction(article.id, "unsuspend")}
+                            className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                          >
+                            Unsuspend
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleArticleAction(article.id, "suspend")}
+                            className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700"
+                          >
+                            Suspend
+                          </button>
+                        )}
                         <button
                           onClick={() => handleArticleAction(article.id, "delete")}
                           className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"

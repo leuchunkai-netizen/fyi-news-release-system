@@ -5,13 +5,14 @@ export interface CommentWithAuthor extends CommentRow {
   user?: { name: string; avatar: string | null } | null;
 }
 
-/** Get comments for an article, enriching with user name/avatar when possible. */
+/** Get comments for an article, enriching with user name/avatar when possible. Only active comments are returned; flagged comments are hidden. */
 export async function getComments(articleId: string): Promise<CommentWithAuthor[]> {
-  // 1) Always load comments themselves
+  // 1) Load only active comments (flagged comments are hidden on the article page)
   const { data, error } = await supabase
     .from("comments")
     .select("*")
     .eq("article_id", articleId)
+    .eq("status", "active")
     .order("created_at", { ascending: true });
   if (error) throw error;
   const comments = (data ?? []) as CommentWithAuthor[];

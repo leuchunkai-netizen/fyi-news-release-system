@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
-import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, ThumbsUp, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info } from "lucide-react";
+import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { getArticleById, incrementArticleViews, getCredibilityAnalysis } from "../../lib/api/articles";
 import { getComments, addComment } from "../../lib/api/comments";
 import { addBookmark, removeBookmark, isBookmarked } from "../../lib/api/bookmarks";
 import type { ArticleWithCategory } from "../../lib/api/articles";
 import type { CommentWithAuthor } from "../../lib/api/comments";
+import { UserAvatar } from "../components/UserAvatar";
 
 function formatTimeAgo(iso: string | null): string {
   if (!iso) return "";
@@ -499,19 +500,13 @@ export function ArticleDetailPage() {
           <div className="space-y-6">
             {comments.map((c) => (
               <div key={c.id} className="flex gap-4">
-                <div className="w-10 h-10 bg-gray-300 rounded-full flex-shrink-0" />
+                <UserAvatar avatar={c.user?.avatar ?? undefined} name={c.user?.name ?? undefined} size="md" className="flex-shrink-0" />
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <p className="font-semibold">{c.user?.name ?? "User"}</p>
                     <span className="text-sm text-muted-foreground">{formatTimeAgo(c.created_at)}</span>
                   </div>
                   <p className="text-sm mb-2">{c.content}</p>
-                  <div className="flex items-center gap-4">
-                    <span className="flex items-center gap-1 text-sm text-muted-foreground">
-                      <ThumbsUp className="w-4 h-4" />
-                      {c.likes}
-                    </span>
-                  </div>
                 </div>
               </div>
             ))}
