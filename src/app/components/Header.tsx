@@ -1,10 +1,37 @@
-import { Search, Menu, User, LogOut, Settings, Upload, BookMarked, Shield, LayoutDashboard } from "lucide-react";
-import { Link } from "react-router";
+import { Search, Menu, User, LogOut, Settings, Upload, BookMarked, Shield, LayoutDashboard, ChevronDown } from "lucide-react";
+import { Link, useLocation } from "react-router";
 import { useUser } from "../context/UserContext";
 import { UserAvatar } from "./UserAvatar";
 
+const INTEREST_CATEGORY_SLUGS: Record<string, string> = {
+  "World News": "world",
+  Politics: "politics",
+  Business: "business",
+  Technology: "technology",
+  Sports: "sports",
+  Science: "science",
+  Health: "health",
+  Culture: "culture",
+  Entertainment: "entertainment",
+  Environment: "environment",
+};
+
 export function Header() {
   const { user, logout } = useUser();
+  const location = useLocation();
+
+  const navLinkClass = (href: string) => {
+    const isActive =
+      href === "/"
+        ? location.pathname === "/"
+        : location.pathname.startsWith(href);
+    return [
+      "inline-flex items-center px-3 py-1.5 rounded-full text-sm transition-colors",
+      isActive
+        ? "bg-red-600 text-white shadow-sm"
+        : "text-gray-700 hover:bg-gray-100",
+    ].join(" ");
+  };
 
   return (
     <header className="border-b sticky top-0 bg-background z-50">
@@ -54,9 +81,9 @@ export function Header() {
                           <BookMarked className="w-4 h-4" />
                           Bookmarks
                         </Link>
-                        <Link to="/subscription-manage" className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100">
+                        <Link to="/billing" className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100">
                           <Settings className="w-4 h-4" />
-                          Manage Subscription
+                          Billing &amp; Plan
                         </Link>
                       </>
                     )}
@@ -107,49 +134,74 @@ export function Header() {
 
         {/* Navigation */}
         <nav className="hidden lg:block border-t">
-          <ul className="flex items-center justify-center gap-8 py-3">
+          <ul className="flex items-center justify-center gap-3 py-3">
             <li>
-              <Link to="/" className="hover:underline">
+              <Link to="/" className={navLinkClass("/")}>
                 Home
               </Link>
             </li>
             {user && (
               <>
                 <li>
-                  <Link to="/category/world" className="hover:underline">
+                  <Link to="/category/world" className={navLinkClass("/category/world")}>
                     World
                   </Link>
                 </li>
                 <li>
-                  <Link to="/category/politics" className="hover:underline">
+                  <Link to="/category/politics" className={navLinkClass("/category/politics")}>
                     Politics
                   </Link>
                 </li>
                 <li>
-                  <Link to="/category/business" className="hover:underline">
+                  <Link to="/category/business" className={navLinkClass("/category/business")}>
                     Business
                   </Link>
                 </li>
                 <li>
-                  <Link to="/category/technology" className="hover:underline">
+                  <Link to="/category/technology" className={navLinkClass("/category/technology")}>
                     Technology
                   </Link>
                 </li>
                 <li>
-                  <Link to="/category/sports" className="hover:underline">
+                  <Link to="/category/sports" className={navLinkClass("/category/sports")}>
                     Sports
                   </Link>
                 </li>
                 <li>
-                  <Link to="/category/science" className="hover:underline">
+                  <Link to="/category/science" className={navLinkClass("/category/science")}>
                     Science
                   </Link>
                 </li>
                 <li>
-                  <Link to="/category/culture" className="hover:underline">
+                  <Link to="/category/culture" className={navLinkClass("/category/culture")}>
                     Culture
                   </Link>
                 </li>
+                {(user.role === "free" || user.role === "premium") && user.interests && user.interests.length > 0 && (
+                  <li className="relative group">
+                    <button className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm text-gray-700 hover:bg-gray-100">
+                      My Interests
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                    <div className="absolute left-0 mt-2 w-56 bg-white border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                      <ul className="py-2 text-sm">
+                        {user.interests.map((interest) => {
+                          const slug = INTEREST_CATEGORY_SLUGS[interest] ?? interest.toLowerCase().replace(/\s+/g, "-");
+                          return (
+                            <li key={interest}>
+                              <Link
+                                to={`/category/${slug}`}
+                                className="block px-4 py-2 hover:bg-gray-100"
+                              >
+                                {interest}
+                              </Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  </li>
+                )}
                 {(user.role === "free" || user.role === "premium") && (
                   <li>
                     <Link

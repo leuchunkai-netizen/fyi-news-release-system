@@ -279,12 +279,22 @@ export function ProfilePage() {
                   Apply as Expert
                 </button>
               )}
-              <Link
-                to="/testimonials/submit"
-                className="block w-full px-4 py-2 border rounded-lg hover:bg-gray-50 text-center text-sm"
-              >
-                Submit Testimonial
-              </Link>
+              {user.role === "admin" && (
+                <Link
+                  to="/admin"
+                  className="block w-full px-4 py-2 bg-purple-600 text-white text-center rounded-lg hover:bg-purple-700 text-sm"
+                >
+                  Go to Admin Dashboard
+                </Link>
+              )}
+              {user.role !== "admin" && (
+                <Link
+                  to="/testimonials/submit"
+                  className="block w-full px-4 py-2 border rounded-lg hover:bg-gray-50 text-center text-sm"
+                >
+                  Submit Testimonial
+                </Link>
+              )}
             </div>
           </div>
 
@@ -296,7 +306,8 @@ export function ProfilePage() {
                 <h2 className="text-xl font-semibold">Personal Information</h2>
                 <button
                   onClick={() => setIsEditing(!isEditing)}
-                  className="text-sm text-red-600 hover:underline"
+                  className="inline-flex items-center px-3 py-1.5 rounded-full border text-xs font-medium transition-colors
+                    border-red-600 text-red-600 hover:bg-red-600 hover:text-white"
                 >
                   {isEditing ? "Cancel" : "Edit"}
                 </button>

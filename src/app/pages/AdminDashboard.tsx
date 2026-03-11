@@ -48,6 +48,14 @@ export function AdminDashboard() {
   const [categoryForm, setCategoryForm] = useState({ name: "", description: "" });
   const [editingIntroSlides, setEditingIntroSlides] = useState<IntroSlide[]>([]);
   const [editingVideoSection, setEditingVideoSection] = useState<VideoSection>({ title: "", description: "", videoUrl: "" });
+  const [editingCategory, setEditingCategory] = useState<CategoryRow | null>(null);
+  const [editingCategoryForm, setEditingCategoryForm] = useState<{ name: string; description: string }>({
+    name: "",
+    description: "",
+  });
+  const [deletingCategory, setDeletingCategory] = useState<CategoryWithCount | null>(null);
+  const [reassignCategoryId, setReassignCategoryId] = useState<string>("");
+  const [selectedExpert, setSelectedExpert] = useState<AdminExpertApplication | null>(null);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [articles, setArticles] = useState<AdminArticle[]>([]);
@@ -203,15 +211,6 @@ export function AdminDashboard() {
       alert((err as Error)?.message ?? "Failed to create category.");
     }
   };
-
-  const [editingCategory, setEditingCategory] = useState<CategoryRow | null>(null);
-  const [editingCategoryForm, setEditingCategoryForm] = useState<{ name: string; description: string }>({
-    name: "",
-    description: "",
-  });
-
-  const [deletingCategory, setDeletingCategory] = useState<CategoryWithCount | null>(null);
-  const [reassignCategoryId, setReassignCategoryId] = useState<string>("");
 
   const handleExpertAction = async (expertId: string, action: "approve" | "reject") => {
     try {
@@ -384,7 +383,7 @@ export function AdminDashboard() {
               }`}
             >
               <Shield className="w-4 h-4 inline mr-2" />
-              Expert Applications
+              Expert Application Management
             </button>
             <button
               onClick={() => setActiveTab("reports")}
@@ -912,18 +911,22 @@ export function AdminDashboard() {
                     <td className="px-6 py-4">
                       <div className="flex gap-2">
                         <button
+                          type="button"
                           onClick={() => handleExpertAction(expert.id, "approve")}
                           className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
                         >
                           Approve
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleExpertAction(expert.id, "reject")}
                           className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
                         >
                           Reject
                         </button>
                         <button
+                          type="button"
+                          onClick={() => setSelectedExpert(expert)}
                           className="px-3 py-1 text-xs border rounded hover:bg-gray-100"
                         >
                           View Details
@@ -1126,6 +1129,82 @@ export function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* Expert application detail modal */}
+      {selectedExpert && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
+            <h2 className="text-xl font-semibold mb-2">Expert Application Details</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Review the full details before approving or rejecting this application.
+            </p>
+
+            <dl className="space-y-3 text-sm">
+              <div>
+                <dt className="font-medium text-gray-700">Applicant</dt>
+                <dd className="text-gray-900">
+                  {selectedExpert.name}{" "}
+                  {selectedExpert.email && (
+                    <span className="text-muted-foreground text-xs block">{selectedExpert.email}</span>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Expertise</dt>
+                <dd className="text-gray-900">{selectedExpert.expertise}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Applied</dt>
+                <dd className="text-gray-900">{selectedExpert.appliedDate || "—"}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Status</dt>
+                <dd className="text-gray-900 capitalize">{selectedExpert.status}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700 mb-1">Credentials & Experience</dt>
+                <dd className="whitespace-pre-wrap text-gray-900 border rounded-md p-3 bg-gray-50">
+                  {selectedExpert.credentials || "No details provided."}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="mt-6 flex justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedExpert(null)}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm"
+              >
+                Close
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedExpert) return;
+                    handleExpertAction(selectedExpert.id, "reject");
+                    setSelectedExpert(null);
+                  }}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedExpert) return;
+                    handleExpertAction(selectedExpert.id, "approve");
+                    setSelectedExpert(null);
+                  }}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                >
+                  Approve
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
