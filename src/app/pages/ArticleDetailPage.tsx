@@ -157,13 +157,14 @@ export function ArticleDetailPage() {
   };
 
   const handleDeleteOwnComment = async (commentId: string) => {
-    if (!user || deletingCommentId) return;
+    if (!user || deletingCommentId || !id) return;
     setDeletingCommentId(commentId);
     try {
       await deleteComment(commentId);
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
-    } catch {
-      // keep current comments if delete fails
+      const refreshed = await getComments(id);
+      setComments(refreshed);
+    } catch (err) {
+      alert((err as Error)?.message ?? "Could not delete comment.");
     } finally {
       setDeletingCommentId(null);
     }

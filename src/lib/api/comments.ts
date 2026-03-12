@@ -55,6 +55,14 @@ export async function addComment(articleId: string, userId: string, content: str
 
 /** Delete own comment (RLS enforces ownership). */
 export async function deleteComment(commentId: string) {
-  const { error } = await supabase.from("comments").delete().eq("id", commentId);
+  const { data, error } = await supabase
+    .from("comments")
+    .delete()
+    .eq("id", commentId)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  if (!data) {
+    throw new Error("Comment was not deleted. You may not have permission.");
+  }
 }
