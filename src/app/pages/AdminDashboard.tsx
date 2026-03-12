@@ -63,18 +63,23 @@ export function AdminDashboard() {
   const [expertApplications, setExpertApplications] = useState<AdminExpertApplication[]>([]);
   const [categoriesRaw, setCategoriesRaw] = useState<CategoryRow[]>([]);
   const [reports, setReports] = useState<AdminReport[]>([]);
+  const [reportsError, setReportsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user || user.role !== "admin") return;
     setLoading(true);
+    setReportsError(null);
     Promise.all([
       getAdminUsers().catch(() => []),
       getAdminArticles().catch(() => []),
       getAdminComments().catch(() => []),
       getAdminExpertApplications().catch(() => []),
       getCategories().catch(() => []),
-      getAdminArticleReports().catch(() => []),
+      getAdminArticleReports().catch((err) => {
+        setReportsError((err as Error)?.message ?? "Could not load flagged reports.");
+        return [];
+      }),
     ])
       .then(([u, a, c, e, cat, r]) => {
         setUsers(u);
@@ -1056,6 +1061,11 @@ export function AdminDashboard() {
                 These reports are created when readers flag articles as inappropriate or misleading.
                 Review each report and decide whether to suspend the article or ignore the report.
               </p>
+              {reportsError && (
+                <p className="text-sm text-red-700 mt-2">
+                  {reportsError}
+                </p>
+              )}
             </div>
             <table className="w-full">
               <thead className="bg-gray-50 border-b">

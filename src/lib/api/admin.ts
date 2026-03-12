@@ -303,31 +303,59 @@ export async function reassignCategoryArticles(oldCategoryId: string, newCategor
 export async function getAdminArticleReports(): Promise<AdminReport[]> {
   const { data, error } = await supabase
     .from("article_reports")
-    .select("id, article_id, user_id, reason, status, created_at, articles(title), users(email)")
+    .select("id, article_id, user_id, reason, status, created_at")
     .order("created_at", { ascending: false });
   if (error) throw error;
-  const rows = data ?? [];
-  return rows.map(
-    (r: {
-      id: string;
-      article_id: string;
-      user_id: string;
-      reason: string | null;
-      status: ReportStatus;
-      created_at: string;
-      articles: { title?: string } | null;
-      users: { email?: string } | null;
-    }) => ({
+  const rows = (data ?? []) as {
+    id: string;
+    article_id: string;
+    user_id: string;
+    reason: string | null;
+    status: ReportStatus;
+    created_at: string;
+  }[];
+
+  if (rows.length === 0) return [];
+
+  try {
+    const articleIds = Array.from(new Set(rows.map((r) => r.article_id)));
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id)));
+
+    const [articlesRes, usersRes] = await Promise.all([
+      supabase.from("articles").select("id, title").in("id", articleIds),
+      supabase.from("users").select("id, email").in("id", userIds),
+    ]);
+
+    const articleMap = new Map<string, string>(
+      (articlesRes.data ?? []).map((a: any) => [a.id as string, (a.title as string) ?? ""])
+    );
+    const userEmailMap = new Map<string, string>(
+      (usersRes.data ?? []).map((u: any) => [u.id as string, (u.email as string) ?? ""])
+    );
+
+    return rows.map((r) => ({
       id: r.id,
       article_id: r.article_id,
       user_id: r.user_id,
       reason: r.reason,
       status: r.status,
       created_at: r.created_at,
-      article_title: (r.articles as { title?: string } | null)?.title ?? "Unknown",
-      reporter_email: (r.users as { email?: string } | null)?.email ?? "",
-    })
-  );
+      article_title: articleMap.get(r.article_id) ?? "Unknown",
+      reporter_email: userEmailMap.get(r.user_id) ?? "",
+    }));
+  } catch {
+    // Fallback: still show report rows even if enrichment fails.
+    return rows.map((r) => ({
+      id: r.id,
+      article_id: r.article_id,
+      user_id: r.user_id,
+      reason: r.reason,
+      status: r.status,
+      created_at: r.created_at,
+      article_title: "Unknown",
+      reporter_email: "",
+    }));
+  }
 }
 
 /** Mark a report as reviewed / resolved (admin only). */

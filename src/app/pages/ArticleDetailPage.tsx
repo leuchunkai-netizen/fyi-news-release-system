@@ -35,6 +35,9 @@ export function ArticleDetailPage() {
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [bookmarked, setBookmarked] = useState(false);
   const [reportSent, setReportSent] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [credibilityAnalysis, setCredibilityAnalysis] = useState<Awaited<ReturnType<typeof getCredibilityAnalysis>>>(null);
 
   useEffect(() => {
@@ -131,14 +134,24 @@ export function ArticleDetailPage() {
   };
 
   const handleReport = async () => {
-    if (!user || !id || reportSent) return;
+    if (!user || !id || reportSent || reportSubmitting) return;
+    const reason = reportReason.trim();
+    if (!reason) {
+      setReportError("Please provide a reason before flagging.");
+      return;
+    }
+    setReportSubmitting(true);
+    setReportError(null);
     try {
       const { reportArticle } = await import("../../lib/api/articles");
-      await reportArticle(id, user.id, "User reported");
+      await reportArticle(id, user.id, reason);
       setReportSent(true);
       setShowFlagConfirm(false);
-    } catch {
-      // ignore
+      setReportReason("");
+    } catch (err) {
+      setReportError((err as Error)?.message ?? "Could not submit your report. Please try again.");
+    } finally {
+      setReportSubmitting(false);
     }
   };
 
@@ -328,22 +341,45 @@ export function ArticleDetailPage() {
                   {showFlagConfirm && !reportSent && (
                     <div className="absolute right-0 top-full mt-2 w-64 bg-white border rounded-lg shadow-lg p-3 z-20">
                       <p className="text-sm mb-3">
-                        Are you sure you want to flag this article for review?
+                        Why are you flagging this article?
                       </p>
+                      <textarea
+                        value={reportReason}
+                        onChange={(e) => {
+                          setReportReason(e.target.value);
+                          if (reportError) setReportError(null);
+                        }}
+                        className="w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-red-600 mb-2"
+                        rows={3}
+                        maxLength={300}
+                        placeholder="Tell us what is misleading, harmful, or inappropriate."
+                        required
+                      />
+                      <p className="text-[11px] text-muted-foreground mb-2">
+                        {reportReason.trim().length}/300
+                      </p>
+                      {reportError && (
+                        <p className="text-xs text-red-600 mb-2">{reportError}</p>
+                      )}
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
                           className="px-3 py-1 text-sm border rounded hover:bg-gray-50"
-                          onClick={() => setShowFlagConfirm(false)}
+                          onClick={() => {
+                            setShowFlagConfirm(false);
+                            setReportReason("");
+                            setReportError(null);
+                          }}
                         >
                           Cancel
                         </button>
                         <button
                           type="button"
-                          className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                          disabled={reportSubmitting || reportReason.trim().length === 0}
+                          className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
                           onClick={handleReport}
                         >
-                          Yes, flag it
+                          {reportSubmitting ? "Submitting..." : "Submit report"}
                         </button>
                       </div>
                     </div>
