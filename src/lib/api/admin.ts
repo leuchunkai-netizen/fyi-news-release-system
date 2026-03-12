@@ -360,6 +360,23 @@ export async function getAdminArticleReports(): Promise<AdminReport[]> {
 
 /** Mark a report as reviewed / resolved (admin only). */
 export async function updateArticleReportStatus(reportId: string, status: ReportStatus = "reviewed") {
-  const { error } = await supabase.from("article_reports").update({ status }).eq("id", reportId);
-  if (error) throw error;
+  const { error } = await supabase.rpc("update_article_report_status_admin", {
+    p_report_id: reportId,
+    p_status: status,
+  });
+
+  if (!error) return;
+
+  // Backward compatibility: if the RPC does not exist yet, try direct table update.
+  // This still depends on RLS policies being present.
+  if ((error as { code?: string }).code === "42883") {
+    const { error: fallbackError } = await supabase
+      .from("article_reports")
+      .update({ status })
+      .eq("id", reportId);
+    if (fallbackError) throw fallbackError;
+    return;
+  }
+
+  throw error;
 }

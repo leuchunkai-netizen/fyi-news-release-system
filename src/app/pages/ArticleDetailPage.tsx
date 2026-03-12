@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
-import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info, Eye } from "lucide-react";
+import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info, Eye, Trash2 } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { getArticleById, incrementArticleViews, getCredibilityAnalysis } from "../../lib/api/articles";
-import { getComments, addComment } from "../../lib/api/comments";
+import { getComments, addComment, deleteComment } from "../../lib/api/comments";
 import { addBookmark, removeBookmark, isBookmarked } from "../../lib/api/bookmarks";
 import type { ArticleWithCategory } from "../../lib/api/articles";
 import type { CommentWithAuthor } from "../../lib/api/comments";
@@ -38,6 +38,7 @@ export function ArticleDetailPage() {
   const [reportReason, setReportReason] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
   const [credibilityAnalysis, setCredibilityAnalysis] = useState<Awaited<ReturnType<typeof getCredibilityAnalysis>>>(null);
 
   useEffect(() => {
@@ -155,6 +156,19 @@ export function ArticleDetailPage() {
     }
   };
 
+  const handleDeleteOwnComment = async (commentId: string) => {
+    if (!user || deletingCommentId) return;
+    setDeletingCommentId(commentId);
+    try {
+      await deleteComment(commentId);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch {
+      // keep current comments if delete fails
+    } finally {
+      setDeletingCommentId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
@@ -167,6 +181,20 @@ export function ArticleDetailPage() {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-2xl font-semibold mb-2">Article not found</h1>
+        <Link to="/" className="text-red-600 hover:underline">Back to home</Link>
+      </div>
+    );
+  }
+
+  // Suspended/non-published articles stay visible in admin moderation,
+  // but should be hidden from regular readers.
+  if (article.status !== "published" && user?.role !== "admin") {
+    return (
+      <div className="container mx-auto px-4 py-16 text-center">
+        <h1 className="text-2xl font-semibold mb-2">Article not available</h1>
+        <p className="text-muted-foreground mb-4">
+          This article is currently unavailable.
+        </p>
         <Link to="/" className="text-red-600 hover:underline">Back to home</Link>
       </div>
     );
@@ -549,9 +577,29 @@ export function ArticleDetailPage() {
               <div key={c.id} className="flex gap-4">
                 <UserAvatar avatar={c.user?.avatar ?? undefined} name={c.user?.name ?? undefined} size="md" className="flex-shrink-0" />
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-2">
                     <p className="font-semibold">{c.user?.name ?? "User"}</p>
                     <span className="text-sm text-muted-foreground">{formatTimeAgo(c.created_at)}</span>
+                    </div>
+                    {user && c.user_id === user.id && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const confirmed = window.confirm(
+                            "Delete this comment? This action cannot be undone."
+                          );
+                          if (!confirmed) return;
+                          handleDeleteOwnComment(c.id);
+                        }}
+                        disabled={deletingCommentId === c.id}
+                        className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 disabled:opacity-50"
+                        title="Delete your comment"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        {deletingCommentId === c.id ? "Deleting..." : "Delete"}
+                      </button>
+                    )}
                   </div>
                   <p className="text-sm mb-2">{c.content}</p>
                 </div>

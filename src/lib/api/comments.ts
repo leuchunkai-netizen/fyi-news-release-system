@@ -52,3 +52,9 @@ export async function addComment(articleId: string, userId: string, content: str
   if (error) throw error;
   return data as CommentRow;
 }
+
+/** Delete own comment (RLS enforces ownership). */
+export async function deleteComment(commentId: string) {
+  const { error } = await supabase.from("comments").delete().eq("id", commentId);
+  if (error) throw error;
+}

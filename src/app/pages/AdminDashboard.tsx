@@ -239,17 +239,45 @@ export function AdminDashboard() {
     action: "suspend" | "ignore"
   ) => {
     try {
+      const reportMeta = reports.find((r) => r.id === reportId);
       if (action === "suspend") {
         await updateArticleStatus(articleId, "flagged");
       }
       await updateArticleReportStatus(reportId, "reviewed");
       setReports((prev) => prev.filter((r) => r.id !== reportId));
       if (action === "suspend") {
-        setArticles((prev) =>
-          prev.map((a) => (a.id === articleId ? { ...a, status: "flagged" } : a))
-        );
+        // Ensure the suspended article is visible immediately in Content Moderation.
+        setArticles((prev) => {
+          const exists = prev.some((a) => a.id === articleId);
+          if (exists) {
+            return prev.map((a) =>
+              a.id === articleId ? { ...a, status: "flagged" } : a
+            );
+          }
+          return [
+            {
+              id: articleId,
+              title: reportMeta?.article_title ?? "Unknown article",
+              author: "Unknown",
+              status: "flagged",
+              date: new Date().toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              }),
+              author_id: null,
+              category_id: null,
+            },
+            ...prev,
+          ];
+        });
+        setSearchTerm("");
       }
-      alert(action === "suspend" ? "Content suspended and report resolved." : "Report marked as resolved.");
+      alert(
+        action === "suspend"
+          ? "Article suspended (not deleted): hidden from users and kept in Content Moderation."
+          : "Report marked as resolved."
+      );
     } catch (err) {
       alert((err as Error)?.message ?? "Failed to update report.");
     }
@@ -1060,6 +1088,9 @@ export function AdminDashboard() {
               <p className="text-sm text-red-800">
                 These reports are created when readers flag articles as inappropriate or misleading.
                 Review each report and decide whether to suspend the article or ignore the report.
+              </p>
+              <p className="text-xs text-red-700 mt-1">
+                Suspended articles are not deleted. They remain visible in Content Moderation as flagged.
               </p>
               {reportsError && (
                 <p className="text-sm text-red-700 mt-2">
