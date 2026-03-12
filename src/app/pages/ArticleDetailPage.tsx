@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
-import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info } from "lucide-react";
+import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info, Eye } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { getArticleById, incrementArticleViews, getCredibilityAnalysis } from "../../lib/api/articles";
 import { getComments, addComment } from "../../lib/api/comments";
@@ -11,14 +11,15 @@ import { UserAvatar } from "../components/UserAvatar";
 
 function formatTimeAgo(iso: string | null): string {
   if (!iso) return "";
-  const d = new Date(iso);
-  const now = new Date();
-  const sec = Math.floor((now.getTime() - d.getTime()) / 1000);
+  const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
   if (sec < 60) return "Just now";
-  if (sec < 3600) return `${Math.floor(sec / 60)} min ago`;
+  if (sec < 3600) {
+    const mins = Math.floor(sec / 60);
+    return `${mins}m ago`;
+  }
   if (sec < 86400) return `${Math.floor(sec / 3600)} hours ago`;
   if (sec < 604800) return `${Math.floor(sec / 86400)} days ago`;
-  return d.toLocaleDateString();
+  return new Date(iso).toLocaleDateString();
 }
 
 export function ArticleDetailPage() {
@@ -56,6 +57,11 @@ export function ArticleDetailPage() {
         // Best-effort side effects; don't hide article if they fail (e.g. RLS).
         try {
           await incrementArticleViews(id);
+          if (!cancelled) {
+            setArticle((prev) =>
+              prev ? { ...prev, views: (prev.views ?? 0) + 1 } : prev
+            );
+          }
         } catch {
           // ignore view count errors
         }
@@ -262,6 +268,11 @@ export function ArticleDetailPage() {
                     <div className="flex items-center gap-1">
                       <Clock className="w-4 h-4" />
                       <span>{formatTimeAgo(article.published_at ?? article.created_at)}</span>
+                    </div>
+                    <span>•</span>
+                    <div className="flex items-center gap-1">
+                      <Eye className="w-4 h-4" />
+                      <span>{article.views ?? 0} views</span>
                     </div>
                   </div>
                 </div>

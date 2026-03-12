@@ -4,9 +4,23 @@ import { ArticleCard } from "../components/ArticleCard";
 import { getCategories, getPublishedArticles } from "@/lib/api";
 import type { ArticleWithCategory } from "@/lib/api/articles";
 import type { CategoryRow } from "@/lib/types/database";
-import { formatDistanceToNow } from "date-fns";
-
 const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1622223145461-271074da3e20?w=1080";
+
+function formatTimeAgoPrecise(iso: string | null): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const diffSec = Math.max(0, Math.floor((now - then) / 1000));
+
+  if (diffSec < 60) return "Just now";
+  if (diffSec < 3600) {
+    const mins = Math.floor(diffSec / 60);
+    return `${mins}m ago`;
+  }
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  if (diffSec < 604800) return `${Math.floor(diffSec / 86400)}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 function mapArticleToCard(a: ArticleWithCategory) {
   return {
@@ -16,7 +30,9 @@ function mapArticleToCard(a: ArticleWithCategory) {
     title: a.title,
     excerpt: a.excerpt ?? "",
     author: a.author_display_name ?? "Staff",
-    time: a.published_at ? formatDistanceToNow(new Date(a.published_at), { addSuffix: true }) : "",
+    time: formatTimeAgoPrecise(a.published_at ?? a.created_at),
+    views: a.views ?? 0,
+    commentsCount: a.commentsCount ?? 0,
     credibilityScore: a.credibility_score ?? undefined,
     isVerified: a.is_verified,
   };

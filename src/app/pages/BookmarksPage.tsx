@@ -9,14 +9,15 @@ import type { CategoryRow } from "../../lib/types/database";
 
 function formatTimeAgo(iso: string | null): string {
   if (!iso) return "";
-  const d = new Date(iso);
-  const now = new Date();
-  const sec = Math.floor((now.getTime() - d.getTime()) / 1000);
+  const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
   if (sec < 60) return "Just now";
-  if (sec < 3600) return `${Math.floor(sec / 60)} min ago`;
+  if (sec < 3600) {
+    const mins = Math.floor(sec / 60);
+    return `${mins}m ago`;
+  }
   if (sec < 86400) return `${Math.floor(sec / 3600)} hours ago`;
   if (sec < 604800) return `${Math.floor(sec / 86400)} days ago`;
-  return d.toLocaleDateString();
+  return new Date(iso).toLocaleDateString();
 }
 
 export function BookmarksPage() {
@@ -113,6 +114,7 @@ export function BookmarksPage() {
                   excerpt={article.excerpt ?? ""}
                   author={article.author_display_name ?? "Unknown"}
                   time={formatTimeAgo(article.published_at ?? article.created_at)}
+                  views={article.views ?? 0}
                   credibilityScore={article.credibility_score ?? undefined}
                   isVerified={article.is_verified}
                 />

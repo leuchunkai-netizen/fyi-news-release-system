@@ -51,35 +51,58 @@ export function FeaturedStory({ stories, hideByline }: FeaturedStoryProps) {
   }
 
   const currentStory = stories[currentIndex];
+  const isBreakingVariant = !hideByline;
 
   return (
     <div className="relative">
-      <article className="relative border-2 border-gray-300 bg-white">
+      <article
+        className={`relative bg-white ${
+          isBreakingVariant
+            ? "border border-gray-300 rounded-lg"
+            : "border-2 border-gray-300"
+        }`}
+      >
         {/* Image Placeholder */}
-        <div className="aspect-[16/9] bg-gray-200 flex items-center justify-center border-b-2 border-gray-300">
+        <div
+          className={`bg-gray-200 flex items-center justify-center border-b-2 border-gray-300 ${
+            isBreakingVariant ? "aspect-[21/9]" : "aspect-[16/9]"
+          }`}
+        >
           <span className="text-gray-400 text-sm">
             {hideByline ? `[INTRO SLIDE ${currentIndex + 1}]` : `[BREAKING NEWS IMAGE ${currentIndex + 1}]`}
           </span>
         </div>
         
         {/* Content Area */}
-        <div className="p-6">
-          <span className="inline-block px-3 py-1 bg-black text-white text-xs font-bold uppercase mb-3">
+        <div className={isBreakingVariant ? "p-4" : "p-6"}>
+          <span
+            className={`inline-block bg-black text-white font-bold uppercase mb-2 ${
+              isBreakingVariant ? "px-2 py-0.5 text-[10px]" : "px-3 py-1 text-xs"
+            }`}
+          >
             {currentStory.category}
           </span>
-          <h2 className="text-2xl font-bold mb-3">
+          <h2
+            className={`font-bold mb-2 ${
+              isBreakingVariant ? "text-lg md:text-xl" : "text-2xl"
+            }`}
+          >
             {currentStory.title}
           </h2>
-          <p className="text-gray-600 mb-4">
+          <p
+            className={`text-gray-600 ${
+              isBreakingVariant ? "text-sm mb-3 line-clamp-2" : "mb-4"
+            }`}
+          >
             {currentStory.excerpt}
           </p>
           {!hideByline && (currentStory.author || currentStory.time) && (
-            <div className="flex items-center gap-3 text-sm text-gray-500">
+            <div className="flex items-center gap-3 text-xs text-gray-500">
               {currentStory.author && <span>By {currentStory.author}</span>}
               {currentStory.author && currentStory.time && <span>•</span>}
               {currentStory.time && (
                 <div className="flex items-center gap-1">
-                  <Clock className="w-4 h-4" />
+                  <Clock className="w-3 h-3" />
                   <span>{currentStory.time}</span>
                 </div>
               )}

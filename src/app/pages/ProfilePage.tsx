@@ -84,6 +84,7 @@ export function ProfilePage() {
         id: user.id,
         email: formData.email,
         name: formData.name,
+        avatar: user.avatar ?? null,
         gender: formData.gender || null,
         location: formData.location || null,
       });

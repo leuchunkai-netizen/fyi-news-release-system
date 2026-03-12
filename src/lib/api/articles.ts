@@ -3,6 +3,16 @@ import type { ArticleRow, ArticleStatus } from "../types/database";
 
 export interface ArticleWithCategory extends ArticleRow {
   category?: { name: string; slug: string } | null;
+  commentsCount?: number;
+}
+
+export interface TrendingArticleItem {
+  id: string;
+  title: string;
+  category: string;
+  views: number;
+  comments: number;
+  publishedAt: string | null;
 }
 
 /** Fetch published articles (home, search). Optional: filter by category slug, text search, limit, offset. */
@@ -35,7 +45,27 @@ export async function getPublishedArticles(options?: {
 
   const { data, error } = await query;
   if (error) throw error;
-  return (data ?? []) as ArticleWithCategory[];
+  const articles = (data ?? []) as ArticleWithCategory[];
+  if (articles.length === 0) return [];
+
+  const articleIds = articles.map((a) => a.id);
+  const { data: commentRows, error: commentErr } = await supabase
+    .from("comments")
+    .select("article_id")
+    .in("article_id", articleIds)
+    .eq("status", "active");
+  if (commentErr) throw commentErr;
+
+  const commentCountMap = new Map<string, number>();
+  for (const row of commentRows ?? []) {
+    const key = (row as { article_id: string }).article_id;
+    commentCountMap.set(key, (commentCountMap.get(key) ?? 0) + 1);
+  }
+
+  return articles.map((article) => ({
+    ...article,
+    commentsCount: commentCountMap.get(article.id) ?? 0,
+  }));
 }
 
 /** Fetch a single published article by id (for detail page). */
@@ -205,4 +235,59 @@ export async function getFeaturedArticles(limit = 5) {
     .limit(limit);
   if (error) throw error;
   return data ?? [];
+}
+
+/** Trending ranking based on views then comment count. */
+export async function getTrendingArticles(limit = 5): Promise<TrendingArticleItem[]> {
+  const fetchSize = Math.max(limit * 4, 20);
+  const { data: rows, error } = await supabase
+    .from("articles")
+    .select("id, title, views, published_at, category:categories(name)")
+    .eq("status", "published")
+    .order("views", { ascending: false })
+    .order("published_at", { ascending: false })
+    .limit(fetchSize);
+
+  if (error) throw error;
+  const articles = (rows ?? []) as {
+    id: string;
+    title: string;
+    views: number | null;
+    published_at: string | null;
+    category?: { name?: string } | null;
+  }[];
+
+  if (articles.length === 0) return [];
+
+  const articleIds = articles.map((a) => a.id);
+  const { data: commentRows, error: commentErr } = await supabase
+    .from("comments")
+    .select("article_id")
+    .in("article_id", articleIds)
+    .eq("status", "active");
+  if (commentErr) throw commentErr;
+
+  const commentCountMap = new Map<string, number>();
+  for (const row of commentRows ?? []) {
+    const key = (row as { article_id: string }).article_id;
+    commentCountMap.set(key, (commentCountMap.get(key) ?? 0) + 1);
+  }
+
+  return articles
+    .map((a) => ({
+      id: a.id,
+      title: a.title,
+      category: (a.category as { name?: string } | null)?.name ?? "News",
+      views: a.views ?? 0,
+      comments: commentCountMap.get(a.id) ?? 0,
+      publishedAt: a.published_at ?? null,
+      publishedAtTs: a.published_at ? new Date(a.published_at).getTime() : 0,
+    }))
+    .sort((a, b) => {
+      if (b.views !== a.views) return b.views - a.views;
+      if (b.comments !== a.comments) return b.comments - a.comments;
+      return b.publishedAtTs - a.publishedAtTs;
+    })
+    .slice(0, limit)
+    .map(({ publishedAtTs, ...item }) => item);
 }
