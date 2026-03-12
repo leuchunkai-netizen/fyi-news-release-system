@@ -4,6 +4,7 @@ import { Upload, X } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { createArticle } from "../../lib/api/articles";
 import { getCategories } from "../../lib/api/categories";
+import { uploadArticleImage } from "../../lib/storage";
 import type { CategoryRow } from "../../lib/types/database";
 
 export function UploadArticlePage() {
@@ -17,7 +18,8 @@ export function UploadArticlePage() {
     excerpt: "",
     tags: ""
   });
-  const [image, setImage] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,9 +39,10 @@ export function UploadArticlePage() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setImageFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setImage(reader.result as string);
+        setImagePreview(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -58,11 +61,22 @@ export function UploadArticlePage() {
         setSubmitting(false);
         return;
       }
-      // image_url column is varchar(500); data URLs are too long, so only use if it's a short URL
-      const image_url =
-        image && image.startsWith("http") && image.length <= 500
-          ? image
-          : null;
+
+      let image_url: string | null = null;
+      if (imageFile && user) {
+        try {
+          image_url = await uploadArticleImage(imageFile, user.id);
+        } catch (uploadErr) {
+          console.error(uploadErr);
+          const message =
+            uploadErr instanceof Error && uploadErr.message
+              ? uploadErr.message
+              : "Image upload failed. Please try again.";
+          setError(message);
+          setSubmitting(false);
+          return;
+        }
+      }
 
       await createArticle({
         author_id: user.id,
@@ -148,12 +162,15 @@ export function UploadArticlePage() {
           {/* Featured Image */}
           <div>
             <label className="block text-sm font-medium mb-2">Featured Image</label>
-            {image ? (
+            {imagePreview ? (
               <div className="relative">
-                <img src={image} alt="Preview" className="w-full h-64 object-cover rounded-lg" />
+                <img src={imagePreview} alt="Preview" className="w-full h-64 object-cover rounded-lg" />
                 <button
                   type="button"
-                  onClick={() => setImage(null)}
+                  onClick={() => {
+                    setImagePreview(null);
+                    setImageFile(null);
+                  }}
                   className="absolute top-2 right-2 p-2 bg-white rounded-full shadow-lg hover:bg-gray-100"
                 >
                   <X className="w-4 h-4" />
