@@ -45,7 +45,6 @@ export function Header() {
           <div className="flex items-center gap-4">
             {!user ? (
               <>
-                <Link to="/subscription" className="text-sm hover:underline">Subscribe</Link>
                 <Link to="/login" className="text-sm hover:underline">Sign In</Link>
                 <Link to="/signup" className="px-4 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700">
                   Create Account

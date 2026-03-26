@@ -8,7 +8,7 @@ import { useTestimonials } from "../context/TestimonialsContext";
 import { getPublishedArticles, getTrendingArticles } from "@/lib/api";
 import type { ArticleWithCategory, TrendingArticleItem } from "@/lib/api/articles";
 import { Link, useParams } from "react-router";
-import { Star, ArrowRight } from "lucide-react";
+import { Star, ArrowRight, Check } from "lucide-react";
 
 const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1622223145461-271074da3e20?w=1080";
 
@@ -479,36 +479,121 @@ export function HomePage() {
               {!user && (
                 <div id="subscription-section" className="border-t pt-8 mb-12">
                   <h2 className="text-2xl font-semibold mb-4">
-                    Subscribe to unlock more
+                    Choose your plan
                   </h2>
                   <p className="text-muted-foreground mb-6">
-                    Get full access to our latest stories, AI summaries,
-                    bookmarks, and more with a Premium subscription.
+                    Get unlimited access to quality journalism.
                   </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="border rounded-lg p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Free */}
+                    <div className="border rounded-lg p-6 bg-white">
                       <h3 className="text-xl font-semibold mb-2">Free</h3>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Continue reading the latest headlines at no cost.
-                      </p>
+                      <div className="mb-4">
+                        <span className="text-3xl font-bold">$0</span>
+                        <span className="text-muted-foreground">/month</span>
+                      </div>
+                      <ul className="space-y-2 mb-6">
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">View news articles</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">Search for articles</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">Comment on articles</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">Upload your own articles</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">Report articles</span>
+                        </li>
+                      </ul>
                       <Link
                         to="/signup"
-                        className="inline-block px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+                        className="block w-full px-4 py-2 bg-gray-600 text-white text-center rounded-lg hover:bg-gray-700"
                       >
-                        Continue as Free
+                        Get Started
                       </Link>
                     </div>
-                    <div className="border-2 border-red-600 rounded-lg p-6">
+
+                    {/* Premium monthly */}
+                    <div className="border-2 border-red-600 rounded-lg p-6 bg-white relative">
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-red-600 text-white text-xs rounded-full">
+                        Most Popular
+                      </div>
                       <h3 className="text-xl font-semibold mb-2">Premium</h3>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Unlock AI summaries, bookmarks, expert tools, and an
-                        ad-free reading experience.
-                      </p>
+                      <div className="mb-4">
+                        <span className="text-3xl font-bold">$9.99</span>
+                        <span className="text-muted-foreground">/month</span>
+                      </div>
+                      <ul className="space-y-2 mb-6">
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm font-semibold">All Free features, plus:</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">AI-generated article summaries</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">Bookmark articles</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">Apply for expert verification</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">Ad-free experience</span>
+                        </li>
+                      </ul>
                       <Link
-                        to="/subscription"
-                        className="inline-block px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
+                        to="/signup"
+                        className="block w-full px-4 py-2 bg-red-600 text-white text-center rounded-lg hover:bg-red-700"
                       >
-                        View Premium Plan
+                        Sign up to get Premium
+                      </Link>
+                    </div>
+
+                    {/* Premium yearly */}
+                    <div className="border rounded-lg p-6 bg-white relative">
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-yellow-500 text-white text-xs rounded-full">
+                        Best Value
+                      </div>
+                      <h3 className="text-xl font-semibold mb-2">Premium (Yearly)</h3>
+                      <div className="mb-2">
+                        <span className="text-3xl font-bold">$4.99</span>
+                        <span className="text-muted-foreground">/month</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        Billed yearly · <span className="font-medium text-gray-900">$59.88</span>/year
+                      </p>
+                      <ul className="space-y-2 mb-6">
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm font-semibold">All Premium features, plus:</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">Save 50% vs monthly billing</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          <span className="text-sm">One payment per year</span>
+                        </li>
+                      </ul>
+                      <Link
+                        to="/signup"
+                        className="block w-full px-4 py-2 bg-yellow-500 text-white text-center rounded-lg hover:bg-yellow-600"
+                      >
+                        Sign up to get Premium Yearly
                       </Link>
                     </div>
                   </div>
