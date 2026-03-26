@@ -10,6 +10,7 @@ interface PendingArticle {
   author_display_name: string | null;
   created_at: string;
   submitted_at: string | null;
+  published_at?: string | null;
   image_url: string | null;
   category: { name: string } | null;
 }
@@ -36,7 +37,7 @@ export function ExpertDashboard() {
   const loadPending = () => {
     if (!user || user.role !== "expert") return;
     setLoading(true);
-    getExpertPendingArticles()
+    getExpertPendingArticles(user.id)
       .then(setPendingArticles)
       .catch(() => setPendingArticles([]))
       .finally(() => setLoading(false));
@@ -114,25 +115,25 @@ export function ExpertDashboard() {
         <div className="mb-8">
           <h1 className="text-3xl font-semibold mb-2">Expert Review Dashboard</h1>
           <p className="text-muted-foreground">
-            Review submitted articles and verify their content accuracy
+            Review published articles that still need your expert approval stamp
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="border rounded-lg p-6">
-            <p className="text-sm text-muted-foreground mb-1">Pending Reviews</p>
+            <p className="text-sm text-muted-foreground mb-1">Needs Your Approval</p>
             <p className="text-3xl font-bold">{loading ? "—" : pendingArticles.length}</p>
           </div>
         </div>
 
         <div className="border rounded-lg">
           <div className="p-6 border-b">
-            <h2 className="text-xl font-semibold">Pending Article Reviews</h2>
+            <h2 className="text-xl font-semibold">Published Articles Awaiting Your Approval</h2>
           </div>
           {loading ? (
             <div className="p-8 text-center text-muted-foreground">Loading…</div>
           ) : pendingArticles.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">No pending articles to review.</div>
+            <div className="p-8 text-center text-muted-foreground">No published articles currently need your approval.</div>
           ) : (
             <div className="divide-y">
               {pendingArticles.map((article) => (
@@ -158,7 +159,7 @@ export function ExpertDashboard() {
                               {article.category?.name ?? "Uncategorized"}
                             </span>
                             <span>By {article.author_display_name ?? "Unknown"}</span>
-                            <span>• Submitted {formatDate(article.submitted_at ?? article.created_at)}</span>
+                            <span>• Published {formatDate(article.published_at ?? article.submitted_at ?? article.created_at)}</span>
                           </div>
                           <p className="text-sm text-muted-foreground">{article.excerpt ?? ""}</p>
                         </div>

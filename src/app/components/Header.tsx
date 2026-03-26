@@ -41,9 +41,7 @@ export function Header() {
       <div className="container mx-auto px-4">
         {/* Top bar */}
         <div className="flex items-center justify-between py-1 border-b">
-          <div className="flex items-center gap-4 text-sm">
-            <span className="text-muted-foreground">Thursday, February 19, 2026</span>
-          </div>
+          <div />
           <div className="flex items-center gap-4">
             {!user ? (
               <>
@@ -208,6 +206,13 @@ export function Header() {
                     >
                       <Upload className="w-4 h-4" />
                       Upload Article
+                    </Link>
+                  </li>
+                )}
+                {user.role === "expert" && (
+                  <li>
+                    <Link to="/expert-dashboard" className={`${navLinkClass("/expert-dashboard")} font-semibold`}>
+                      Expert Dashboard
                     </Link>
                   </li>
                 )}

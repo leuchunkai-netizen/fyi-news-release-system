@@ -229,9 +229,10 @@ export function ArticleDetailPage() {
   }
 
   // Non-published articles are hidden from regular readers.
-  // Exception: authors can view their own rejected articles.
+  // Exceptions: admins and authors can view their own pending/rejected articles.
   const canViewUnpublished =
-    user?.role === "admin" || (article.status === "rejected" && user?.id === article.author_id);
+    user?.role === "admin" ||
+    ((article.status === "pending" || article.status === "rejected") && user?.id === article.author_id);
   if (article.status !== "published" && !canViewUnpublished) {
     return (
       <div className="container mx-auto px-4 py-16 text-center">

@@ -169,24 +169,79 @@ export async function reportArticle(articleId: string, userId: string, reason?: 
   if (error) throw error;
 }
 
-/** Pending articles for expert review (status = pending). */
-export async function getExpertPendingArticles() {
+/** Published articles that are not yet approved by this expert. */
+export async function getExpertPendingArticles(expertId: string) {
+  const { data: expertiseRows, error: expertiseErr } = await supabase
+    .from("expert_applications")
+    .select("expertise")
+    .eq("user_id", expertId)
+    .eq("status", "approved");
+  if (expertiseErr) throw expertiseErr;
+
+  const approvedExpertise = Array.from(
+    new Set(
+      (expertiseRows ?? [])
+        .flatMap((row) =>
+          ((row as { expertise?: string | null }).expertise ?? "")
+            .split(",")
+            .map((value) => value.trim())
+        )
+        .filter((value) => value.length > 0)
+    )
+  );
+  if (approvedExpertise.length === 0) return [];
+
+  const { data: categories, error: categoriesErr } = await supabase.from("categories").select("id, name, slug");
+  if (categoriesErr) throw categoriesErr;
+  const normalizedExpertise = approvedExpertise.map((value) => value.toLowerCase());
+  const expertiseCategoryIds = Array.from(
+    new Set(
+      (categories ?? [])
+        .filter((category) => {
+          const normalizedName = (category as { name: string }).name.toLowerCase();
+          const normalizedSlug = (category as { slug: string }).slug.toLowerCase();
+          return normalizedExpertise.some((entry) => {
+            const slugified = entry.replace(/\s+/g, "-");
+            return entry === normalizedName || entry === normalizedSlug || slugified === normalizedSlug;
+          });
+        })
+        .map((category) => (category as { id: string }).id)
+    )
+  );
+  if (expertiseCategoryIds.length === 0) return [];
+
   const { data, error } = await supabase
     .from("articles")
-    .select("id, title, excerpt, author_display_name, created_at, submitted_at, image_url, category:categories(name)")
-    .eq("status", "pending")
-    .order("submitted_at", { ascending: false });
+    .select("id, title, excerpt, author_display_name, created_at, submitted_at, published_at, image_url, category:categories(name)")
+    .eq("status", "published")
+    .in("category_id", expertiseCategoryIds)
+    .order("published_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as {
+  const published = (data ?? []) as {
     id: string;
     title: string;
     excerpt: string | null;
     author_display_name: string | null;
     created_at: string;
     submitted_at: string | null;
+    published_at: string | null;
     image_url: string | null;
     category: { name: string } | null;
   }[];
+
+  if (published.length === 0) return [];
+
+  const publishedIds = published.map((item) => item.id);
+  const { data: approvedRows, error: approvedErr } = await supabase
+    .from("expert_reviews")
+    .select("article_id")
+    .eq("expert_id", expertId)
+    .eq("decision", "approved")
+    .in("article_id", publishedIds);
+  if (approvedErr) throw approvedErr;
+
+  const approvedByThisExpert = new Set((approvedRows ?? []).map((row) => (row as { article_id: string }).article_id));
+  return published.filter((item) => !approvedByThisExpert.has(item.id));
 }
 
 /** Submit expert review: insert expert_reviews and update article status. */

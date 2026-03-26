@@ -1,11 +1,44 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router";
-import { Upload, X } from "lucide-react";
+import { AlertTriangle, Upload, X } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { createArticle, getArticleById, updateArticle } from "../../lib/api/articles";
 import { getCategories } from "../../lib/api/categories";
 import { uploadArticleImage } from "../../lib/storage";
 import type { CategoryRow } from "../../lib/types/database";
+
+interface RejectionFinding {
+  snippet: string;
+  issue: string;
+  reason: string;
+}
+
+function stripHtml(input: string): string {
+  return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function getSampleRejectionFindings(content: string, rejectionReason: string): RejectionFinding[] {
+  const plain = stripHtml(content);
+  const sentences = (plain.match(/[^.!?]+[.!?]?/g) ?? [])
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 50);
+  const snippets = [
+    sentences[0] ?? "This claim appears in the article but does not include a verifiable source citation.",
+    sentences[1] ?? "This statement makes a strong factual assertion without clear supporting evidence.",
+  ];
+  return [
+    {
+      snippet: snippets[0],
+      issue: "Unverified factual claim",
+      reason: rejectionReason || "The claim could not be verified against reliable source material.",
+    },
+    {
+      snippet: snippets[1],
+      issue: "Possible overstatement or missing citation",
+      reason: "High-confidence language was used, but supporting proof was not sufficiently provided.",
+    },
+  ];
+}
 
 export function UploadArticlePage() {
   const { id: editingArticleId } = useParams<{ id?: string }>();
@@ -26,6 +59,9 @@ export function UploadArticlePage() {
   const [initialLoading, setInitialLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isRejectedEdit, setIsRejectedEdit] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState<string>("");
+  const [rejectionFindings, setRejectionFindings] = useState<RejectionFinding[]>([]);
 
   useEffect(() => {
     getCategories().then(setCategories).catch(() => setCategories([]));
@@ -54,6 +90,16 @@ export function UploadArticlePage() {
           content: article.content ?? "",
           excerpt: article.excerpt ?? "",
         });
+        if (article.status === "rejected") {
+          const reason = article.rejection_reason?.trim() || "The article did not meet credibility requirements.";
+          setIsRejectedEdit(true);
+          setRejectionReason(reason);
+          setRejectionFindings(getSampleRejectionFindings(article.content ?? "", reason));
+        } else {
+          setIsRejectedEdit(false);
+          setRejectionReason("");
+          setRejectionFindings([]);
+        }
         setExistingImageUrl(article.image_url ?? null);
         setImagePreview(article.image_url ?? null);
       } catch (err) {
@@ -196,6 +242,39 @@ export function UploadArticlePage() {
         {error && (
           <div className="mb-6 p-4 rounded-lg bg-red-50 text-red-800 border border-red-200">
             {error}
+          </div>
+        )}
+
+        {isRejectedEdit && (
+          <div className="mb-6 border-2 border-red-200 rounded-lg overflow-hidden">
+            <div className="bg-red-50 border-b border-red-200 px-4 py-3">
+              <h3 className="font-semibold text-red-900 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                AI Rejection Guidance (Sample)
+              </h3>
+              <p className="text-sm text-red-800 mt-1">
+                Update the highlighted sections below, then submit for review again.
+              </p>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-sm">
+                <span className="font-semibold">Rejection reason:</span> {rejectionReason}
+              </p>
+              {rejectionFindings.map((finding, index) => (
+                <div key={index} className="border border-red-200 bg-red-50 rounded p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide mb-2">Highlighted Portion {index + 1}</p>
+                  <blockquote className="text-sm italic border-l-4 border-red-400 pl-3 mb-2">
+                    "{finding.snippet}"
+                  </blockquote>
+                  <p className="text-sm">
+                    <span className="font-semibold">Flag:</span> {finding.issue}
+                  </p>
+                  <p className="text-sm">
+                    <span className="font-semibold">Why flagged:</span> {finding.reason}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

@@ -240,7 +240,16 @@ export function MyArticlesPage() {
                           Continue Editing
                         </Link>
                       )}
-                      {(article.status === "rejected" || article.status === "pending") && (
+                      {article.status === "rejected" && (
+                        <Link
+                          to={`/my-articles/${article.id}/edit`}
+                          className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm flex items-center gap-2"
+                        >
+                          <Edit className="w-4 h-4" />
+                          Revise & Resubmit
+                        </Link>
+                      )}
+                      {article.status === "pending" && (
                         <Link
                           to={`/article/${article.id}`}
                           className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm flex items-center gap-2"
