@@ -32,3 +32,32 @@ export async function uploadArticleImage(file: File, userId: string): Promise<st
   return publicUrlData.publicUrl;
 }
 
+/**
+ * Upload a guest landing slide image to Supabase Storage and return a public URL.
+ * Reuses the existing "article_image" bucket.
+ */
+export async function uploadGuestSlideImage(file: File, userId: string): Promise<string> {
+  const ext = file.name.split(".").pop() || "jpg";
+  const safeExt = ext.toLowerCase().split("?")[0];
+  const fileName = `guest-slides/${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
+
+  const { data, error } = await supabase.storage
+    .from(ARTICLE_IMAGES_BUCKET)
+    .upload(fileName, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+
+  if (error || !data) {
+    throw error ?? new Error("Failed to upload slide image");
+  }
+
+  const { data: publicUrlData } = supabase.storage.from(ARTICLE_IMAGES_BUCKET).getPublicUrl(data.path);
+  if (!publicUrlData?.publicUrl) {
+    throw new Error("Failed to get public URL for uploaded slide image");
+  }
+
+  return publicUrlData.publicUrl;
+}
+

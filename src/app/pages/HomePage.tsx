@@ -77,6 +77,45 @@ function mapArticleToCard(a: ArticleWithCategory) {
   };
 }
 
+function getYouTubeEmbedUrl(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+
+  // Already an embed URL
+  if (trimmed.includes("youtube.com/embed/")) return trimmed;
+
+  // If it's a plain ID (11 chars typical), convert it.
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
+    return `https://www.youtube.com/embed/${trimmed}`;
+  }
+
+  // Try parsing as URL (watch/share/embed/shorts/youtu.be)
+  try {
+    const url = new URL(trimmed);
+    const host = url.hostname.replace(/^www\./, "");
+
+    if (host === "youtu.be") {
+      const id = url.pathname.split("/").filter(Boolean)[0];
+      return id ? `https://www.youtube.com/embed/${id}` : trimmed;
+    }
+
+    if (host.endsWith("youtube.com")) {
+      const v = url.searchParams.get("v");
+      if (v) return `https://www.youtube.com/embed/${v}`;
+
+      const parts = url.pathname.split("/").filter(Boolean);
+      // /shorts/<id> or /embed/<id>
+      if (parts[0] === "shorts" && parts[1]) return `https://www.youtube.com/embed/${parts[1]}`;
+      if (parts[0] === "embed" && parts[1]) return `https://www.youtube.com/embed/${parts[1]}`;
+    }
+  } catch {
+    // Not a valid URL; fall through to best-effort behavior.
+  }
+
+  // Best-effort fallback
+  return trimmed;
+}
+
 export function HomePage() {
   const { category } = useParams<{ category?: string }>();
   const activeCategorySlug = category ?? "all";
@@ -340,7 +379,7 @@ export function HomePage() {
             <div id="featured-section" className="mb-4">
               <FeaturedStory
                 stories={introSlides.map((s) => ({
-                  imageUrl: "",
+                  imageUrl: s.imageUrl || "",
                   category: s.category,
                   title: s.title,
                   excerpt: s.excerpt,
@@ -368,11 +407,7 @@ export function HomePage() {
                   <div className="aspect-video max-w-3xl rounded-lg overflow-hidden bg-black">
                     <iframe
                       title="Platform introduction"
-                      src={
-                        videoSection.videoUrl.startsWith("http")
-                          ? videoSection.videoUrl
-                          : `https://www.youtube.com/embed/${videoSection.videoUrl}`
-                      }
+                      src={getYouTubeEmbedUrl(videoSection.videoUrl)}
                       className="w-full h-full"
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       allowFullScreen

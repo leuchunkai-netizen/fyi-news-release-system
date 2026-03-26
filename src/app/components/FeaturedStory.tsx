@@ -68,9 +68,18 @@ export function FeaturedStory({ stories, hideByline }: FeaturedStoryProps) {
             isBreakingVariant ? "aspect-[21/9]" : "aspect-[16/9]"
           }`}
         >
-          <span className="text-gray-400 text-sm">
-            {hideByline ? `[INTRO SLIDE ${currentIndex + 1}]` : `[BREAKING NEWS IMAGE ${currentIndex + 1}]`}
-          </span>
+          {currentStory.imageUrl ? (
+            <img
+              src={currentStory.imageUrl}
+              alt={currentStory.title}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <span className="text-gray-400 text-sm">
+              {hideByline ? `[INTRO SLIDE ${currentIndex + 1}]` : `[BREAKING NEWS IMAGE ${currentIndex + 1}]`}
+            </span>
+          )}
         </div>
         
         {/* Content Area */}

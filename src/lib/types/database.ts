@@ -265,6 +265,7 @@ export interface Database {
           category: string;
           title: string;
           excerpt: string;
+          image_url: string | null;
           created_at: string;
         };
         Insert: {
@@ -273,6 +274,7 @@ export interface Database {
           category: string;
           title: string;
           excerpt: string;
+          image_url?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["intro_slides"]["Insert"]>;

@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useId, useState, useEffect, useMemo } from "react";
 import { Users, FileText, MessageSquare, Tag, Ban, Search, Plus, Edit, Trash2, Shield, LayoutDashboard } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { useGuestLanding, type IntroSlide, type VideoSection } from "../context/GuestLandingContext";
+import { uploadGuestSlideImage } from "@/lib/storage";
 import {
   getAdminUsers,
   getAdminArticles,
@@ -40,6 +41,7 @@ interface CategoryWithCount extends CategoryRow {
 export function AdminDashboard() {
   const { user } = useUser();
   const { introSlides, videoSection, setIntroSlides, setVideoSection } = useGuestLanding();
+  const slideFileInputId = useId();
   const [activeTab, setActiveTab] = useState<
     "users" | "articles" | "comments" | "categories" | "experts" | "guestLanding" | "reports"
   >("users");
@@ -295,15 +297,64 @@ export function AdminDashboard() {
 
   const handleSaveVideoSection = async () => {
     try {
-      await updateGuestLandingSettings({
+      const saved = await updateGuestLandingSettings({
         video_title: editingVideoSection.title,
         video_description: editingVideoSection.description || null,
         video_url: editingVideoSection.videoUrl || null,
       });
+      if (!saved) {
+        throw new Error("Save failed. No settings row returned from Supabase.");
+      }
       setVideoSection(editingVideoSection);
       alert("Video section saved.");
     } catch (err) {
       alert((err as Error)?.message ?? "Failed to save video section.");
+    }
+  };
+
+  function getYouTubeEmbedUrl(input: string): string {
+    const trimmed = input.trim();
+    if (!trimmed) return "";
+
+    if (trimmed.includes("youtube.com/embed/")) return trimmed;
+    if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return `https://www.youtube.com/embed/${trimmed}`;
+
+    try {
+      const url = new URL(trimmed);
+      const host = url.hostname.replace(/^www\./, "");
+
+      if (host === "youtu.be") {
+        const id = url.pathname.split("/").filter(Boolean)[0];
+        return id ? `https://www.youtube.com/embed/${id}` : trimmed;
+      }
+
+      if (host.endsWith("youtube.com")) {
+        const v = url.searchParams.get("v");
+        if (v) return `https://www.youtube.com/embed/${v}`;
+
+        const parts = url.pathname.split("/").filter(Boolean);
+        if (parts[0] === "shorts" && parts[1]) return `https://www.youtube.com/embed/${parts[1]}`;
+        if (parts[0] === "embed" && parts[1]) return `https://www.youtube.com/embed/${parts[1]}`;
+      }
+    } catch {
+      // ignore
+    }
+
+    return trimmed;
+  }
+
+  const handlePickSlideImage = async (index: number, file: File | null) => {
+    if (!file) return;
+    if (!user) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file.");
+      return;
+    }
+    try {
+      const url = await uploadGuestSlideImage(file, user.id);
+      updateIntroSlide(index, "imageUrl", url);
+    } catch (err) {
+      alert((err as Error)?.message ?? "Failed to upload slide image.");
     }
   };
 
@@ -316,7 +367,7 @@ export function AdminDashboard() {
   };
 
   const addIntroSlide = () => {
-    setEditingIntroSlides((prev) => [...prev, { category: "Features", title: "", excerpt: "" }]);
+    setEditingIntroSlides((prev) => [...prev, { category: "Features", title: "", excerpt: "", imageUrl: "" }]);
   };
 
   const removeIntroSlide = (index: number) => {
@@ -1022,6 +1073,59 @@ export function AdminDashboard() {
                       rows={2}
                       className="w-full px-3 py-2 border rounded text-sm"
                     />
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-700">Slide image</span>
+                        {slide.imageUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => updateIntroSlide(index, "imageUrl", "")}
+                            className="text-xs text-red-600 hover:underline"
+                          >
+                            Remove image
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <label
+                        className="block w-full cursor-pointer rounded border border-dashed bg-white px-3 py-4 text-sm text-muted-foreground hover:bg-gray-50"
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const file = e.dataTransfer.files?.[0] ?? null;
+                          void handlePickSlideImage(index, file);
+                        }}
+                      >
+                        <input
+                          id={`${slideFileInputId}-${index}`}
+                          type="file"
+                          accept="image/*"
+                          className="sr-only"
+                          onChange={(e) => void handlePickSlideImage(index, e.target.files?.[0] ?? null)}
+                        />
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-medium text-gray-800">Drag & drop an image</div>
+                            <div className="text-xs text-muted-foreground">
+                              or click to upload (PNG/JPG/WebP)
+                            </div>
+                          </div>
+                          <div className="text-xs px-2 py-1 border rounded bg-gray-50 text-gray-700">
+                            Upload
+                          </div>
+                        </div>
+                      </label>
+
+                      {slide.imageUrl ? (
+                        <div className="rounded border bg-white overflow-hidden">
+                          <img src={slide.imageUrl} alt={slide.title || `Slide ${index + 1}`} className="w-full h-40 object-cover" />
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1044,9 +1148,9 @@ export function AdminDashboard() {
             <div className="p-6 border-t">
               <h4 className="font-semibold mb-4">Video section</h4>
               <p className="text-sm text-muted-foreground mb-4">
-                Optional intro video for guests. Use a full embed URL (e.g. https://www.youtube.com/embed/VIDEO_ID) or a YouTube video ID.
+                Optional intro video for guests. Paste a YouTube link (watch/share), an embed URL, or a video ID.
               </p>
-              <div className="space-y-3 max-w-xl">
+              <div className="space-y-3 max-w-3xl">
                 <input
                   type="text"
                   value={editingVideoSection.title}
@@ -1065,14 +1169,34 @@ export function AdminDashboard() {
                   type="text"
                   value={editingVideoSection.videoUrl}
                   onChange={(e) => setEditingVideoSection((p) => ({ ...p, videoUrl: e.target.value }))}
-                  placeholder="YouTube embed URL or video ID"
+                  placeholder="Paste YouTube link / embed URL / video ID"
                   className="w-full px-3 py-2 border rounded"
                 />
+                {editingVideoSection.videoUrl ? (
+                  <div className="pt-2">
+                    <div className="text-sm font-medium mb-2">Preview (admin)</div>
+                    <div className="aspect-video w-full max-w-3xl rounded-lg overflow-hidden bg-black">
+                      <iframe
+                        title="Guest landing video preview"
+                        src={getYouTubeEmbedUrl(editingVideoSection.videoUrl)}
+                        className="w-full h-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-2">
+                      Note: the guest landing sections only appear on the home page when you are logged out.
+                    </div>
+                  </div>
+                ) : null}
               </div>
+              {editingVideoSection.videoUrl ? (
+                <div className="mt-0" />
+              ) : null}
               <button
                 type="button"
                 onClick={handleSaveVideoSection}
-                className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                className="mt-6 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
               >
                 Save video section
               </button>

@@ -5,6 +5,7 @@ export interface IntroSlide {
   category: string;
   title: string;
   excerpt: string;
+  imageUrl: string;
 }
 
 export interface VideoSection {
@@ -14,10 +15,10 @@ export interface VideoSection {
 }
 
 const defaultIntroSlides: IntroSlide[] = [
-  { category: "Features", title: "Curated News", excerpt: "Stay informed with trusted, up-to-date stories from verified sources." },
-  { category: "Features", title: "Expert Verification", excerpt: "Articles can be reviewed and verified by experts for extra credibility." },
-  { category: "Features", title: "AI Summaries", excerpt: "Get quick AI-powered summaries so you can catch up on the news in less time." },
-  { category: "Features", title: "Bookmarks & Personalization", excerpt: "Save articles and tailor your feed to the topics you care about most." },
+  { category: "Features", title: "Curated News", excerpt: "Stay informed with trusted, up-to-date stories from verified sources.", imageUrl: "" },
+  { category: "Features", title: "Expert Verification", excerpt: "Articles can be reviewed and verified by experts for extra credibility.", imageUrl: "" },
+  { category: "Features", title: "AI Summaries", excerpt: "Get quick AI-powered summaries so you can catch up on the news in less time.", imageUrl: "" },
+  { category: "Features", title: "Bookmarks & Personalization", excerpt: "Save articles and tailor your feed to the topics you care about most.", imageUrl: "" },
 ];
 
 const defaultVideoSection: VideoSection = {
@@ -52,7 +53,7 @@ export function GuestLandingProvider({ children }: { children: ReactNode }) {
         setState((prev) => ({
           introSlides:
             slides.length > 0
-              ? slides.map((s) => ({ category: s.category, title: s.title, excerpt: s.excerpt }))
+              ? slides.map((s) => ({ category: s.category, title: s.title, excerpt: s.excerpt, imageUrl: s.image_url ?? "" }))
               : prev.introSlides,
           videoSection: settings
             ? {
