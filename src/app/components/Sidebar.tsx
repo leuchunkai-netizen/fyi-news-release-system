@@ -11,11 +11,19 @@ interface TrendingItem {
   publishedAt: string | null;
 }
 
-interface SidebarProps {
-  trendingArticles: TrendingItem[];
+interface LatestItem {
+  id: string;
+  title: string;
+  category: string;
+  publishedAt: string | null;
 }
 
-export function Sidebar({ trendingArticles }: SidebarProps) {
+interface SidebarProps {
+  trendingArticles: TrendingItem[];
+  latestArticles: LatestItem[];
+}
+
+export function Sidebar({ trendingArticles, latestArticles }: SidebarProps) {
   const formatPublishedTime = (iso: string | null) => {
     if (!iso) return "";
     const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -36,7 +44,11 @@ export function Sidebar({ trendingArticles }: SidebarProps) {
         </div>
         <div className="space-y-4">
           {trendingArticles.map((article) => (
-            <div key={article.id} className="flex gap-3 group cursor-pointer border-b pb-3 last:border-b-0">
+            <Link
+              key={article.id}
+              to={`/article/${article.id}`}
+              className="flex gap-3 group border-b pb-3 last:border-b-0"
+            >
               <span className="text-2xl font-bold text-gray-300">{article.rank}</span>
               <div className="flex-1 min-w-0">
                 <span className="text-xs font-bold uppercase border border-black px-1">
@@ -49,7 +61,7 @@ export function Sidebar({ trendingArticles }: SidebarProps) {
                   {article.views} views • {article.comments} comments
                 </p>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </div>
@@ -60,8 +72,8 @@ export function Sidebar({ trendingArticles }: SidebarProps) {
           LATEST NEWS
         </h2>
         <div className="space-y-3">
-          {trendingArticles.slice(0, 5).map((article) => (
-            <div key={`latest-${article.id}`} className="group cursor-pointer">
+          {latestArticles.slice(0, 5).map((article) => (
+            <Link key={`latest-${article.id}`} to={`/article/${article.id}`} className="group block">
               <span className="inline-block text-[10px] font-bold uppercase border border-black px-1 py-0.5 mb-1">
                 {article.category}
               </span>
@@ -71,7 +83,7 @@ export function Sidebar({ trendingArticles }: SidebarProps) {
               <p className="text-[11px] text-muted-foreground mt-1">
                 {formatPublishedTime(article.publishedAt)}
               </p>
-            </div>
+            </Link>
           ))}
         </div>
       </div>

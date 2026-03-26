@@ -124,7 +124,7 @@ export function HomePage() {
     let cancelled = false;
     setLoading(true);
     setDbError(null);
-    (async () => {
+    const fetchLatest = async () => {
       try {
         const fetchSize = 100;
         let offset = 0;
@@ -148,8 +148,17 @@ export function HomePage() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
-    return () => { cancelled = true; };
+    };
+
+    void fetchLatest();
+    const intervalId = window.setInterval(() => {
+      void fetchLatest();
+    }, 60000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, [activeCategorySlug]);
 
   useEffect(() => {
@@ -201,8 +210,9 @@ export function HomePage() {
       };
     }
 
-    getTrendingArticles(5)
-      .then((rows) => {
+    const fetchTrending = async () => {
+      try {
+        const rows = await getTrendingArticles(5);
         if (cancelled) return;
         setTrendingArticles(
           rows.map((item, index) => ({
@@ -210,13 +220,19 @@ export function HomePage() {
             rank: index + 1,
           }))
         );
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setTrendingArticles([]);
-      });
+      }
+    };
+
+    void fetchTrending();
+    const intervalId = window.setInterval(() => {
+      void fetchTrending();
+    }, 60000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
   }, [user?.id]);
 
@@ -294,6 +310,12 @@ export function HomePage() {
     latestPage * latestPageSize,
     latestPage * latestPageSize + latestPageSize
   );
+  const sidebarLatestArticles = sortedLatestArticles.slice(0, 5).map((article) => ({
+    id: article.id,
+    title: article.title,
+    category: article.category,
+    publishedAt: article.publishedAt ?? null,
+  }));
 
   useEffect(() => {
     setForYouPage((prev) => Math.min(prev, Math.max(0, forYouPageCount - 1)));
@@ -789,7 +811,10 @@ export function HomePage() {
             {/* Sidebar - hide for guest users */}
             {user && (
               <div className="lg:col-span-1">
-                <Sidebar trendingArticles={trendingArticles} />
+                <Sidebar
+                  trendingArticles={trendingArticles}
+                  latestArticles={sidebarLatestArticles}
+                />
               </div>
             )}
           </div>
