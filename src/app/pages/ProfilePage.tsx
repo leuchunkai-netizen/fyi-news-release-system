@@ -715,7 +715,7 @@ export function ProfilePage() {
                 <li>AI-powered article summaries</li>
                 <li>Bookmark articles for later</li>
                 <li>Social media sharing features</li>
-                <li>Ad-free reading experience</li>
+                <li>Priority customer support</li>
               </ul>
               <p className="text-sm text-muted-foreground mb-6">
                 Your premium access will continue until <strong>March 19, 2026</strong>.

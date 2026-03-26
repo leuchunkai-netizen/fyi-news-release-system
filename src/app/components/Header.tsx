@@ -9,6 +9,12 @@ import type { CategoryRow } from "../../lib/types/database";
 export function Header() {
   const { user, logout } = useUser();
   const location = useLocation();
+  const currentDate = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
   const [newsCategories, setNewsCategories] = useState<CategoryRow[]>([]);
 
   useEffect(() => {
@@ -41,7 +47,9 @@ export function Header() {
       <div className="container mx-auto px-4">
         {/* Top bar */}
         <div className="flex items-center justify-between py-1 border-b">
-          <div />
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-muted-foreground">{currentDate}</span>
+          </div>
           <div className="flex items-center gap-4">
             {!user ? (
               <>
