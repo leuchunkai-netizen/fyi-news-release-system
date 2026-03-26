@@ -7,7 +7,7 @@ export interface CommentWithAuthor extends CommentRow {
 
 /** Get comments for an article, enriching with user name/avatar when possible. Only active comments are returned; flagged comments are hidden. */
 export async function getComments(articleId: string): Promise<CommentWithAuthor[]> {
-  // 1) Load only active comments (flagged comments are hidden on the article page)
+  // load only active comments so flagged ones stay hidden on article page
   const { data, error } = await supabase
     .from("comments")
     .select("*")
@@ -17,8 +17,7 @@ export async function getComments(articleId: string): Promise<CommentWithAuthor[
   if (error) throw error;
   const comments = (data ?? []) as CommentWithAuthor[];
 
-  // 2) Best-effort: attach basic user info. If RLS on users blocks this,
-  // we simply return comments without user objects so the UI still works.
+  // try to attach author name/avatar; if users table is blocked, return raw comments
   try {
     const userIds = Array.from(new Set(comments.map((c) => c.user_id)));
     if (!userIds.length) return comments;
@@ -62,6 +61,7 @@ export async function deleteComment(commentId: string) {
     .select("id")
     .maybeSingle();
   if (error) throw error;
+  // no returned row means delete did not happen (rls or invalid id)
   if (!data) {
     throw new Error("Comment was not deleted. You may not have permission.");
   }

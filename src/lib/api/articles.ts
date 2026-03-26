@@ -129,7 +129,12 @@ export async function createArticle(insert: {
 /** Update article (author only). */
 export async function updateArticle(
   id: string,
-  updates: Partial<Pick<ArticleRow, "title" | "excerpt" | "content" | "image_url" | "author_display_name" | "author_bio" | "category_id" | "status">>
+  updates: Partial<
+    Pick<
+      ArticleRow,
+      "title" | "excerpt" | "content" | "image_url" | "author_display_name" | "author_bio" | "category_id" | "status" | "submitted_at" | "rejection_reason"
+    >
+  >
 ) {
   const { data, error } = await supabase.from("articles").update(updates).eq("id", id).select().single();
   if (error) throw error;

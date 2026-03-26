@@ -30,6 +30,7 @@ export const router = createBrowserRouter([
       { path: "subscription/checkout", Component: SubscriptionPaymentPage },
       { path: "article/:id", Component: ArticleDetailPage },
       { path: "upload-article", Component: UploadArticlePage },
+      { path: "my-articles/:id/edit", Component: UploadArticlePage },
       { path: "my-articles", Component: MyArticlesPage },
       { path: "profile", Component: ProfilePage },
       { path: "expert-dashboard", Component: ExpertDashboard },

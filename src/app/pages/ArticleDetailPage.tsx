@@ -22,6 +22,41 @@ function formatTimeAgo(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
+interface RejectionFinding {
+  snippet: string;
+  issue: string;
+  reason: string;
+  severity: "high" | "medium";
+}
+
+function stripHtml(input: string): string {
+  return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildSampleRejectionFindings(content: string, concerns: string[], warnings: string[]): RejectionFinding[] {
+  const plain = stripHtml(content);
+  const sentences = (plain.match(/[^.!?]+[.!?]?/g) ?? [])
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 40);
+
+  const fallbackSnippets = [
+    "A core claim in this article appears definitive but lacks verifiable sourcing in the submitted text.",
+    "Another key statement relies on broad certainty without enough supporting evidence or attribution.",
+  ];
+
+  return [0, 1].map((index) => {
+    const snippet = sentences[index] ?? fallbackSnippets[index];
+    const guidance = warnings[index] ?? concerns[index] ?? "This claim needs stronger evidence from reliable sources.";
+    const hasStrongClaimSignal = /\b(always|never|guarantee|proven|cure|100%|\d+%)\b/i.test(snippet);
+    return {
+      snippet,
+      issue: hasStrongClaimSignal ? "Potentially over-confident or absolute claim" : "Insufficiently supported factual claim",
+      reason: guidance,
+      severity: hasStrongClaimSignal ? "high" : "medium",
+    };
+  });
+}
+
 export function ArticleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useUser();
@@ -46,9 +81,11 @@ export function ArticleDetailPage() {
       setLoading(false);
       return;
     }
+    // stop state updates if component unmounts while requests are running
     let cancelled = false;
     (async () => {
       try {
+        // load the article first so we can render core content asap
         const art = await getArticleById(id);
         if (cancelled) return;
         if (!art) {
@@ -58,7 +95,7 @@ export function ArticleDetailPage() {
 
         setArticle(art as ArticleWithCategory);
 
-        // Best-effort side effects; don't hide article if they fail (e.g. RLS).
+        // run extra data updates, but do not fail the whole page if one fails
         try {
           await incrementArticleViews(id);
           if (!cancelled) {
@@ -106,6 +143,7 @@ export function ArticleDetailPage() {
   const handleCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !id || !comment.trim()) return;
+    // post comment, then refresh list from db so counts/order stay accurate
     setCommentSubmitting(true);
     try {
       await addComment(id, user.id, comment.trim());
@@ -121,6 +159,7 @@ export function ArticleDetailPage() {
 
   const handleBookmarkToggle = async () => {
     if (!user || user.role !== "premium" || !id) return;
+    // simple toggle flow: remove if saved, add if not
     try {
       if (bookmarked) {
         await removeBookmark(user.id, id);
@@ -136,6 +175,7 @@ export function ArticleDetailPage() {
 
   const handleReport = async () => {
     if (!user || !id || reportSent || reportSubmitting) return;
+    // require a reason so moderators know why it was flagged
     const reason = reportReason.trim();
     if (!reason) {
       setReportError("Please provide a reason before flagging.");
@@ -160,6 +200,7 @@ export function ArticleDetailPage() {
     if (!user || deletingCommentId || !id) return;
     setDeletingCommentId(commentId);
     try {
+      // delete in db first, then reload comments to reflect final server state
       await deleteComment(commentId);
       const refreshed = await getComments(id);
       setComments(refreshed);
@@ -187,9 +228,11 @@ export function ArticleDetailPage() {
     );
   }
 
-  // Suspended/non-published articles stay visible in admin moderation,
-  // but should be hidden from regular readers.
-  if (article.status !== "published" && user?.role !== "admin") {
+  // Non-published articles are hidden from regular readers.
+  // Exception: authors can view their own rejected articles.
+  const canViewUnpublished =
+    user?.role === "admin" || (article.status === "rejected" && user?.id === article.author_id);
+  if (article.status !== "published" && !canViewUnpublished) {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-2xl font-semibold mb-2">Article not available</h1>
@@ -251,6 +294,15 @@ export function ArticleDetailPage() {
         ];
 
   const warnings = (credibilityAnalysis?.warnings as string[] | undefined) ?? [];
+  const rejectionReasonSummary =
+    article.status === "rejected"
+      ? article.rejection_reason?.trim() ||
+        "This article was rejected because parts of the content could not be sufficiently verified with reliable evidence."
+      : null;
+  const rejectionFindings =
+    article.status === "rejected"
+      ? buildSampleRejectionFindings(article.content ?? "", concerns, warnings)
+      : [];
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -446,6 +498,49 @@ export function ArticleDetailPage() {
           </div>
         )}
 
+        {article.status === "rejected" && (
+          <div className="mb-8 border-2 border-red-200 rounded-lg overflow-hidden">
+            <div className="bg-red-50 border-b border-red-200 px-6 py-4">
+              <h3 className="font-semibold text-red-900 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-700" />
+                AI Rejection Analysis (Sample)
+              </h3>
+              <p className="text-sm text-red-800 mt-1">
+                This sample explains why the article may have been rejected and highlights content that likely triggered low-credibility checks.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="p-3 border border-red-200 bg-red-50 rounded">
+                <p className="text-sm text-red-800">
+                  <span className="font-semibold">Rejection reason:</span> {rejectionReasonSummary}
+                </p>
+              </div>
+              {rejectionFindings.map((finding, index) => (
+                <div
+                  key={index}
+                  className={`rounded border p-4 ${finding.severity === "high" ? "border-red-300 bg-red-50" : "border-yellow-300 bg-yellow-50"}`}
+                >
+                  <p className="text-xs uppercase tracking-wide font-semibold mb-2">
+                    Highlight {index + 1} • {finding.severity === "high" ? "High Risk" : "Medium Risk"}
+                  </p>
+                  <blockquote className="text-sm italic border-l-4 border-current pl-3 mb-2">
+                    "{finding.snippet}"
+                  </blockquote>
+                  <p className="text-sm">
+                    <span className="font-semibold">Issue:</span> {finding.issue}
+                  </p>
+                  <p className="text-sm">
+                    <span className="font-semibold">Why flagged:</span> {finding.reason}
+                  </p>
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                Tip: Add citations, attribute expert statements, and avoid absolute wording unless you can provide high-quality evidence.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div
           className="prose prose-lg max-w-none mb-12"
           dangerouslySetInnerHTML={{ __html: article.content || "" }}
@@ -587,6 +682,7 @@ export function ArticleDetailPage() {
                       <button
                         type="button"
                         onClick={() => {
+                          // quick safety check before permanent delete
                           const confirmed = window.confirm(
                             "Delete this comment? This action cannot be undone."
                           );

@@ -12,7 +12,7 @@ function formatDate(iso: string | null): string {
 
 export function MyArticlesPage() {
   const { user } = useUser();
-  const [filter, setFilter] = useState<"all" | "published" | "pending" | "rejected">("all");
+  const [filter, setFilter] = useState<"all" | "draft" | "published" | "pending" | "rejected">("all");
   const [articles, setArticles] = useState<ArticleWithCategory[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -53,6 +53,13 @@ export function MyArticlesPage() {
           <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-700 text-xs rounded">
             <Clock className="w-3 h-3" />
             Under Review
+          </span>
+        );
+      case "draft":
+        return (
+          <span className="flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+            <Edit className="w-3 h-3" />
+            Draft
           </span>
         );
       case "rejected":
@@ -110,6 +117,13 @@ export function MyArticlesPage() {
             className={`px-4 py-2 ${filter === "all" ? "border-b-2 border-red-600 font-semibold" : "text-muted-foreground"}`}
           >
             All ({articles.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilter("draft")}
+            className={`px-4 py-2 ${filter === "draft" ? "border-b-2 border-red-600 font-semibold" : "text-muted-foreground"}`}
+          >
+            Draft ({articles.filter((a) => a.status === "draft").length})
           </button>
           <button
             type="button"
@@ -193,6 +207,11 @@ export function MyArticlesPage() {
                         Submitted on {formatDate(article.submitted_at ?? article.created_at)} • Under expert review
                       </p>
                     )}
+                    {article.status === "draft" && (
+                      <p className="text-sm text-muted-foreground mb-3">
+                        Saved as draft on {formatDate(article.updated_at)}
+                      </p>
+                    )}
 
                     {article.status === "rejected" && article.rejection_reason && (
                       <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded">
@@ -210,6 +229,15 @@ export function MyArticlesPage() {
                         >
                           <Eye className="w-4 h-4" />
                           View
+                        </Link>
+                      )}
+                      {article.status === "draft" && (
+                        <Link
+                          to={`/my-articles/${article.id}/edit`}
+                          className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm flex items-center gap-2"
+                        >
+                          <Edit className="w-4 h-4" />
+                          Continue Editing
                         </Link>
                       )}
                       {(article.status === "rejected" || article.status === "pending") && (

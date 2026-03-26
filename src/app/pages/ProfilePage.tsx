@@ -5,19 +5,11 @@ import { Link } from "react-router";
 import { upsertUserProfile, getCurrentUserWithInterests } from "../../lib/api/auth";
 import { setUserInterests } from "../../lib/api/userInterests";
 import { submitExpertApplication } from "../../lib/api/expertApplications";
+import { getCategories } from "../../lib/api/categories";
 import { supabase } from "../../lib/supabase";
 import { UserAvatar } from "../components/UserAvatar";
 import { PROFILE_PHOTO_OPTIONS } from "../../lib/profilePhotos";
-
-const EXPERTISE_LABELS: Record<string, string> = {
-  medicine: "Medicine & Healthcare",
-  science: "Science & Research",
-  technology: "Technology & Engineering",
-  economics: "Economics & Finance",
-  law: "Law & Legal Studies",
-  journalism: "Journalism & Media",
-  other: "Other",
-};
+import type { CategoryRow } from "../../lib/types/database";
 
 export function ProfilePage() {
   const { user, setUser } = useUser();
@@ -27,6 +19,7 @@ export function ProfilePage() {
   const [formData, setFormData] = useState({
     name: user?.name || "",
     email: user?.email || "",
+    age: user?.age?.toString() || "",
     location: user?.location || "",
     gender: user?.gender || "",
     interests: (user?.interests || []) as string[]
@@ -47,6 +40,7 @@ export function ProfilePage() {
   const [expertSubmitting, setExpertSubmitting] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [avatarSaving, setAvatarSaving] = useState(false);
+  const [expertiseCategories, setExpertiseCategories] = useState<CategoryRow[]>([]);
 
   useEffect(() => {
     if (user) {
@@ -54,12 +48,17 @@ export function ProfilePage() {
         ...prev,
         name: user.name,
         email: user.email,
+        age: user.age?.toString() || "",
         gender: user.gender || "",
         location: user.location || "",
         interests: user.interests || [],
       }));
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    getCategories().then(setExpertiseCategories).catch(() => setExpertiseCategories([]));
+  }, []);
 
   if (!user) {
     return (
@@ -78,6 +77,11 @@ export function ProfilePage() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    const parsedAge = formData.age.trim() ? Number(formData.age) : null;
+    if (parsedAge !== null && (!Number.isFinite(parsedAge) || parsedAge < 13 || parsedAge > 120)) {
+      alert("Please enter a valid age between 13 and 120.");
+      return;
+    }
     setProfileSaving(true);
     try {
       await upsertUserProfile({
@@ -86,11 +90,10 @@ export function ProfilePage() {
         name: formData.name,
         avatar: user.avatar ?? null,
         gender: formData.gender || null,
+        age: parsedAge,
         location: formData.location || null,
       });
-      if (formData.interests.length) {
-        await setUserInterests(user.id, formData.interests);
-      }
+      await setUserInterests(user.id, formData.interests);
       const data = await getCurrentUserWithInterests();
       if (data) {
         setUser({
@@ -100,6 +103,7 @@ export function ProfilePage() {
           role: data.profile.role as "guest" | "free" | "premium" | "expert" | "admin",
           avatar: data.profile.avatar ?? undefined,
           gender: data.profile.gender ?? undefined,
+          age: data.profile.age ?? undefined,
           location: (data.profile as { location?: string | null }).location ?? undefined,
           interests: data.interests.length ? data.interests : undefined,
         });
@@ -116,11 +120,15 @@ export function ProfilePage() {
   const handleExpertApplication = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    const expertiseLabel = EXPERTISE_LABELS[expertApplication.expertise] || expertApplication.expertise;
+    const selectedCategory = expertiseCategories.find((c) => c.slug === expertApplication.expertise);
+    if (!selectedCategory) {
+      alert("Please select a valid area of expertise.");
+      return;
+    }
     const credentials = [expertApplication.credentials, expertApplication.experience].filter(Boolean).join("\n\n");
     setExpertSubmitting(true);
     try {
-      await submitExpertApplication(user.id, expertiseLabel, credentials);
+      await submitExpertApplication(user.id, selectedCategory.name, credentials);
       setShowExpertApplication(false);
       setExpertApplication({ expertise: "", credentials: "", experience: "", proofDocument: null });
       alert("Expert verification application submitted! We'll review it within 5-7 business days.");
@@ -148,6 +156,7 @@ export function ProfilePage() {
         name: user.name,
         avatar: avatarPath,
         gender: user.gender ?? null,
+        age: user.age ?? null,
         location: user.location ?? null,
       });
       const data = await getCurrentUserWithInterests();
@@ -159,6 +168,7 @@ export function ProfilePage() {
           role: data.profile.role as "guest" | "free" | "premium" | "expert" | "admin",
           avatar: data.profile.avatar ?? undefined,
           gender: data.profile.gender ?? undefined,
+          age: data.profile.age ?? undefined,
           location: (data.profile as { location?: string | null }).location ?? undefined,
           interests: data.interests.length ? data.interests : undefined,
         });
@@ -354,16 +364,31 @@ export function ProfilePage() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium mb-2">Age</label>
+                  <input
+                    type="number"
+                    min={13}
+                    max={120}
+                    value={formData.age}
+                    onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+                    disabled={!isEditing}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 disabled:bg-gray-50"
+                    placeholder="Age"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium mb-2">Interests</label>
                   <p className="text-xs text-muted-foreground mb-2">
                     These are used to personalize your feed. Click to add or remove.
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {["World News","Politics","Business","Technology","Sports","Science","Health","Culture","Entertainment","Environment"].map((interest) => {
+                    {expertiseCategories.map((category) => {
+                      const interest = category.name;
                       const active = formData.interests.includes(interest);
                       return (
                         <button
-                          key={interest}
+                          key={category.id}
                           type="button"
                           disabled={!isEditing}
                           onClick={() => {
@@ -383,6 +408,11 @@ export function ProfilePage() {
                         </button>
                       );
                     })}
+                    {expertiseCategories.length === 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        No categories available yet.
+                      </span>
+                    )}
                     {formData.interests.length === 0 && (
                       <span className="text-xs text-muted-foreground">
                         No interests selected yet.
@@ -522,14 +552,12 @@ export function ProfilePage() {
                     className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
                     required
                   >
-                    <option value="">Select your field</option>
-                    <option value="medicine">Medicine & Healthcare</option>
-                    <option value="science">Science & Research</option>
-                    <option value="technology">Technology & Engineering</option>
-                    <option value="economics">Economics & Finance</option>
-                    <option value="law">Law & Legal Studies</option>
-                    <option value="journalism">Journalism & Media</option>
-                    <option value="other">Other</option>
+                    <option value="">Select a category</option>
+                    {expertiseCategories.map((category) => (
+                      <option key={category.id} value={category.slug}>
+                        {category.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
