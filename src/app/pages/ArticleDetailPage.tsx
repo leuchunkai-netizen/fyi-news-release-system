@@ -245,7 +245,7 @@ export function ArticleDetailPage() {
     );
   }
 
-  const categoryName = (article as ArticleWithCategory).category?.name ?? "News";
+  const categoryName = (article as ArticleWithCategory).category?.name ?? "Uncategorized";
   const categorySlug = (article as ArticleWithCategory).category?.slug ?? "all";
   const expertScore = article.credibility_score ?? null;
   const aiScore = credibilityAnalysis?.score ?? null;

@@ -1,48 +1,20 @@
-import { useCallback, useState, useEffect } from "react";
+import { useCallback, useState, useEffect, useMemo } from "react";
 import { FeaturedStory } from "../components/FeaturedStory";
 import { ArticleCard } from "../components/ArticleCard";
 import { Sidebar } from "../components/Sidebar";
 import { useUser } from "../context/UserContext";
 import { useGuestLanding } from "../context/GuestLandingContext";
 import { useTestimonials } from "../context/TestimonialsContext";
-import { getPublishedArticles, getTrendingArticles } from "@/lib/api";
+import { getCategories, getPublishedArticles, getTrendingArticles } from "@/lib/api";
 import type { ArticleWithCategory, TrendingArticleItem } from "@/lib/api/articles";
+import type { CategoryRow } from "@/lib/types/database";
 import { Link, useParams } from "react-router";
-import { Star, ArrowRight, Check } from "lucide-react";
+import { Star, Check, ChevronLeft, ChevronRight } from "lucide-react";
 
 const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1622223145461-271074da3e20?w=1080";
 
-const INTEREST_CATEGORY_SLUGS: Record<string, string> = {
-  "World News": "world",
-  Politics: "politics",
-  Business: "business",
-  Technology: "technology",
-  Sports: "sports",
-  Science: "science",
-  Health: "health",
-  Culture: "culture",
-  Entertainment: "entertainment",
-  Environment: "environment",
-};
-
-const CATEGORY_LABELS: Record<string, string> = {
-  all: "Latest",
-  world: "World",
-  politics: "Politics",
-  business: "Business",
-  technology: "Technology",
-  sports: "Sports",
-  science: "Science",
-  health: "Health",
-  culture: "Culture",
-  entertainment: "Entertainment",
-  environment: "Environment",
-};
-
 function toCategorySlug(label: string) {
-  return (
-    INTEREST_CATEGORY_SLUGS[label] ?? label.toLowerCase().replace(/\s+/g, "-")
-  );
+  return label.toLowerCase().replace(/\s+/g, "-");
 }
 
 function formatTimeAgoPrecise(iso: string | null): string {
@@ -74,6 +46,7 @@ function mapArticleToCard(a: ArticleWithCategory) {
     commentsCount: a.commentsCount ?? 0,
     credibilityScore: a.credibility_score ?? undefined,
     isVerified: a.is_verified,
+    publishedAtTs: new Date(a.published_at ?? a.created_at).getTime(),
   };
 }
 
@@ -129,25 +102,63 @@ export function HomePage() {
   const [trendingArticles, setTrendingArticles] = useState<
     Array<TrendingArticleItem & { rank: number }>
   >([]);
+  const [allCategories, setAllCategories] = useState<CategoryRow[]>([]);
+  const [forYouPage, setForYouPage] = useState(0);
+  const [latestPage, setLatestPage] = useState(0);
+  const [latestSort, setLatestSort] = useState<"recent" | "views" | "comments">("recent");
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState<string | null>(null);
+
+  const resolveCategorySlug = useCallback(
+    (label: string) => {
+      const byName = allCategories.find((c) => c.name.toLowerCase() === label.toLowerCase());
+      if (byName) return byName.slug;
+      const bySlug = allCategories.find((c) => c.slug.toLowerCase() === label.toLowerCase());
+      if (bySlug) return bySlug.slug;
+      return toCategorySlug(label);
+    },
+    [allCategories]
+  );
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setDbError(null);
-    getPublishedArticles({ limit: 10, categorySlug: activeCategorySlug })
-      .then((list) => {
-        if (!cancelled) setDbArticles(list.map(mapArticleToCard));
-      })
-      .catch((err) => {
-        if (!cancelled) setDbError(err?.message ?? "Could not load articles from database.");
-      })
-      .finally(() => {
+    (async () => {
+      try {
+        const fetchSize = 100;
+        let offset = 0;
+        const all: ArticleWithCategory[] = [];
+        while (true) {
+          const chunk = await getPublishedArticles({
+            limit: fetchSize,
+            offset,
+            categorySlug: activeCategorySlug,
+          });
+          all.push(...chunk);
+          if (chunk.length < fetchSize) break;
+          offset += fetchSize;
+        }
+        if (!cancelled) setDbArticles(all.map(mapArticleToCard));
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : "Could not load articles from database.";
+          setDbError(message);
+        }
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
     return () => { cancelled = true; };
   }, [activeCategorySlug]);
+
+  useEffect(() => {
+    setLatestPage(0);
+  }, [activeCategorySlug]);
+
+  useEffect(() => {
+    setLatestPage(0);
+  }, [latestSort]);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,13 +170,22 @@ export function HomePage() {
       };
     }
 
-    getPublishedArticles({ limit: 50, categorySlug: "all" })
-      .then((list) => {
-        if (!cancelled) setForYouSourceArticles(list.map(mapArticleToCard));
-      })
-      .catch(() => {
+    (async () => {
+      try {
+        const pageSize = 100;
+        let offset = 0;
+        const all: ArticleWithCategory[] = [];
+        while (true) {
+          const chunk = await getPublishedArticles({ limit: pageSize, offset, categorySlug: "all" });
+          all.push(...chunk);
+          if (chunk.length < pageSize) break;
+          offset += pageSize;
+        }
+        if (!cancelled) setForYouSourceArticles(all.map(mapArticleToCard));
+      } catch {
         if (!cancelled) setForYouSourceArticles([]);
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -199,6 +219,10 @@ export function HomePage() {
       cancelled = true;
     };
   }, [user?.id]);
+
+  useEffect(() => {
+    getCategories().then(setAllCategories).catch(() => setAllCategories([]));
+  }, []);
 
   const scrollToSection = useCallback((sectionId: string) => {
     if (typeof window === "undefined") return;
@@ -243,13 +267,37 @@ export function HomePage() {
     user && user.interests && user.interests.length
       ? forYouSourceArticles
           .filter((article) => {
-            const articleSlug = toCategorySlug(article.category);
+            const articleSlug = resolveCategorySlug(article.category);
             return user.interests!.some(
-              (interest) => toCategorySlug(interest) === articleSlug
+              (interest) => resolveCategorySlug(interest) === articleSlug
             );
           })
-          .slice(0, 4)
       : [];
+  const forYouPageSize = 4;
+  const forYouPageCount = Math.max(1, Math.ceil(forYouArticles.length / forYouPageSize));
+  const forYouPages = Array.from({ length: forYouPageCount }, (_, index) =>
+    forYouArticles.slice(index * forYouPageSize, index * forYouPageSize + forYouPageSize)
+  );
+  const sortedLatestArticles = useMemo(() => {
+    const list = [...dbArticles];
+    if (latestSort === "views") {
+      return list.sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
+    }
+    if (latestSort === "comments") {
+      return list.sort((a, b) => (b.commentsCount ?? 0) - (a.commentsCount ?? 0));
+    }
+    return list.sort((a, b) => (b.publishedAtTs ?? 0) - (a.publishedAtTs ?? 0));
+  }, [dbArticles, latestSort]);
+  const latestPageSize = 9;
+  const latestPageCount = Math.max(1, Math.ceil(sortedLatestArticles.length / latestPageSize));
+  const currentLatestArticles = sortedLatestArticles.slice(
+    latestPage * latestPageSize,
+    latestPage * latestPageSize + latestPageSize
+  );
+
+  useEffect(() => {
+    setForYouPage((prev) => Math.min(prev, Math.max(0, forYouPageCount - 1)));
+  }, [forYouPageCount]);
 
   return (
     <main className="container mx-auto px-4 py-8">
@@ -316,14 +364,47 @@ export function HomePage() {
             >
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-xl font-semibold">For You</h2>
-                <p className="text-xs text-muted-foreground">
-                  Articles based on your interests
-                </p>
+                <div className="flex items-center gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    Articles based on your interests
+                  </p>
+                  {forYouArticles.length > forYouPageSize && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setForYouPage((prev) => Math.max(0, prev - 1))}
+                        disabled={forYouPage === 0}
+                        className="p-1.5 border rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Previous For You articles"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForYouPage((prev) => Math.min(forYouPageCount - 1, prev + 1))}
+                        disabled={forYouPage >= forYouPageCount - 1}
+                        className="p-1.5 border rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Next For You articles"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {forYouArticles.map((article) => (
-                  <ArticleCard key={article.id} {...article} variant="compact" />
-                ))}
+              <div className="overflow-hidden">
+                <div
+                  className="flex transition-transform duration-500 ease-out"
+                  style={{ transform: `translateX(-${forYouPage * 100}%)` }}
+                >
+                  {forYouPages.map((pageArticles, pageIndex) => (
+                    <div key={pageIndex} className="min-w-full grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {pageArticles.map((article) => (
+                        <ArticleCard key={article.id} {...article} variant="compact" />
+                      ))}
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
           )}
@@ -437,43 +518,116 @@ export function HomePage() {
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-semibold">
                   {activeCategorySlug === "all"
-                    ? "Latest News"
-                    : `${CATEGORY_LABELS[activeCategorySlug] ?? "Category"} News`}
+                    ? `News • ${
+                        latestSort === "recent"
+                          ? "Recently Published"
+                          : latestSort === "views"
+                            ? "Most Viewed"
+                            : "Most Commented"
+                      }`
+                    : `${
+                        allCategories.find((c) => c.slug === activeCategorySlug)?.name ?? "Category"
+                      } • ${
+                        latestSort === "recent"
+                          ? "Recently Published"
+                          : latestSort === "views"
+                            ? "Most Viewed"
+                            : "Most Commented"
+                      }`}
                 </h2>
-                {/* View All - Only show for registered users */}
-                {user && (
-                  <Link
-                    to="/search"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-700 border border-red-200 rounded-full bg-red-50 hover:bg-red-100 transition-colors"
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setLatestSort("recent")}
+                    className={`px-3 py-1.5 text-sm rounded-full border ${
+                      latestSort === "recent"
+                        ? "bg-red-600 border-red-600 text-white"
+                        : "bg-white hover:bg-gray-50"
+                    }`}
                   >
-                    View All
-                    <ArrowRight className="w-4 h-4" />
-                  </Link>
-                )}
+                    Recently Published
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLatestSort("views")}
+                    className={`px-3 py-1.5 text-sm rounded-full border ${
+                      latestSort === "views"
+                        ? "bg-red-600 border-red-600 text-white"
+                        : "bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    Most Viewed
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLatestSort("comments")}
+                    className={`px-3 py-1.5 text-sm rounded-full border ${
+                      latestSort === "comments"
+                        ? "bg-red-600 border-red-600 text-white"
+                        : "bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    Most Commented
+                  </button>
+                </div>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
                 {loading ? (
-                  <p className="col-span-2 text-muted-foreground py-8">
+                  <p className="col-span-3 text-muted-foreground py-8">
                     Loading latest news…
                   </p>
                 ) : dbError ? (
-                  <p className="col-span-2 text-amber-600 py-4">
+                  <p className="col-span-3 text-amber-600 py-4">
                     {dbError} Check your .env (VITE_SUPABASE_URL,
                     VITE_SUPABASE_ANON_KEY) and that the migration was run.
                   </p>
                 ) : dbArticles.length > 0 ? (
-                  (user ? dbArticles : dbArticles.slice(0, 2)).map((article) => (
-                    <ArticleCard key={article.id} {...article} />
+                  currentLatestArticles.map((article) => (
+                    <ArticleCard key={article.id} {...article} variant="compact" />
                   ))
                 ) : (
-                  <p className="col-span-2 text-muted-foreground py-8">
+                  <p className="col-span-3 text-muted-foreground py-8">
                     {activeCategorySlug === "all"
                       ? "No published articles yet. Publish articles from Admin or Upload to see them here."
                       : "No published articles in this category yet."}
                   </p>
                 )}
               </div>
+              {!loading && !dbError && sortedLatestArticles.length > latestPageSize && (
+                <div className="flex items-center justify-center gap-2 mb-8 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setLatestPage((prev) => Math.max(0, prev - 1))}
+                    disabled={latestPage === 0}
+                    className="px-3 py-1.5 border rounded text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Prev
+                  </button>
+                  {Array.from({ length: latestPageCount }, (_, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => setLatestPage(index)}
+                      className={`px-3 py-1.5 border rounded text-sm ${
+                        latestPage === index
+                          ? "bg-red-600 border-red-600 text-white"
+                          : "hover:bg-gray-50"
+                      }`}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setLatestPage((prev) => Math.min(latestPageCount - 1, prev + 1))}
+                    disabled={latestPage >= latestPageCount - 1}
+                    className="px-3 py-1.5 border rounded text-sm hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
 
               {/* Subscription teaser - for Guest Users, under Latest News */}
               {!user && (

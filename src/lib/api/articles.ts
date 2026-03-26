@@ -337,7 +337,7 @@ export async function getTrendingArticles(limit = 5): Promise<TrendingArticleIte
     .map((a) => ({
       id: a.id,
       title: a.title,
-      category: (a.category as { name?: string } | null)?.name ?? "News",
+      category: (a.category as { name?: string } | null)?.name ?? "Uncategorized",
       views: a.views ?? 0,
       comments: commentCountMap.get(a.id) ?? 0,
       publishedAt: a.published_at ?? null,
