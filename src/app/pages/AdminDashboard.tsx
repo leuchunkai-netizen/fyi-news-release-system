@@ -428,8 +428,8 @@ export function AdminDashboard() {
         </div>
 
         {/* Tabs */}
-        <div className="sticky top-24 z-40 bg-background border-b mb-6">
-          <div className="flex gap-4 overflow-x-auto py-1">
+        <div className="sticky top-[11rem] z-40 bg-background border-b mb-6 shadow-sm">
+          <div className="flex gap-4 overflow-x-auto py-2">
             <button
               onClick={() => setActiveTab("users")}
               className={`px-4 py-2 ${
