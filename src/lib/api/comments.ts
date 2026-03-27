@@ -66,3 +66,20 @@ export async function deleteComment(commentId: string) {
     throw new Error("Comment was not deleted. You may not have permission.");
   }
 }
+
+/** Report a comment (authenticated). */
+export async function reportComment(commentId: string, userId: string, reason: string) {
+  const trimmedReason = reason.trim();
+  if (!trimmedReason) {
+    throw new Error("Please provide a reason before flagging this comment.");
+  }
+
+  const { error } = await supabase.from("comment_reports").insert({
+    comment_id: commentId,
+    user_id: userId,
+    reason: trimmedReason,
+    status: "pending",
+  });
+
+  if (error) throw error;
+}

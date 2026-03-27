@@ -94,6 +94,7 @@ export function HomePage() {
   const activeCategorySlug = category ?? "all";
 
   const { user } = useUser();
+  const isUnregisteredUser = !user || user.role === "guest";
   const { introSlides, videoSection } = useGuestLanding();
   const { approvedTestimonials } = useTestimonials();
 
@@ -310,6 +311,9 @@ export function HomePage() {
     latestPage * latestPageSize,
     latestPage * latestPageSize + latestPageSize
   );
+  const visibleLatestArticles = isUnregisteredUser
+    ? sortedLatestArticles.slice(0, 3)
+    : currentLatestArticles;
   const sidebarLatestArticles = sortedLatestArticles.slice(0, 5).map((article) => ({
     id: article.id,
     title: article.title,
@@ -605,7 +609,7 @@ export function HomePage() {
                     VITE_SUPABASE_ANON_KEY) and that the migration was run.
                   </p>
                 ) : dbArticles.length > 0 ? (
-                  currentLatestArticles.map((article) => (
+                  visibleLatestArticles.map((article) => (
                     <ArticleCard key={article.id} {...article} variant="compact" />
                   ))
                 ) : (
@@ -616,7 +620,7 @@ export function HomePage() {
                   </p>
                 )}
               </div>
-              {!loading && !dbError && sortedLatestArticles.length > latestPageSize && (
+              {!loading && !dbError && !isUnregisteredUser && sortedLatestArticles.length > latestPageSize && (
                 <div className="flex items-center justify-center gap-2 mb-8 flex-wrap">
                   <button
                     type="button"
