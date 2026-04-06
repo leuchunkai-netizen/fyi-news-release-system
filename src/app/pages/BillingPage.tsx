@@ -93,7 +93,7 @@ export function BillingPage() {
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Upgrade to Premium to unlock bookmarks, expert features, and an ad-free experience.
+              Upgrade to Premium to unlock bookmarks, expert features, and AI-powered summaries.
             </p>
           )}
         </div>

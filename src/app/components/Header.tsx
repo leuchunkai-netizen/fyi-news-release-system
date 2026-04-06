@@ -1,24 +1,33 @@
+import { useEffect, useState } from "react";
 import { Search, Menu, User, LogOut, Settings, Upload, BookMarked, Shield, LayoutDashboard, ChevronDown } from "lucide-react";
 import { Link, useLocation } from "react-router";
 import { useUser } from "../context/UserContext";
 import { UserAvatar } from "./UserAvatar";
-
-const INTEREST_CATEGORY_SLUGS: Record<string, string> = {
-  "World News": "world",
-  Politics: "politics",
-  Business: "business",
-  Technology: "technology",
-  Sports: "sports",
-  Science: "science",
-  Health: "health",
-  Culture: "culture",
-  Entertainment: "entertainment",
-  Environment: "environment",
-};
+import { getCategories } from "../../lib/api/categories";
+import type { CategoryRow } from "../../lib/types/database";
 
 export function Header() {
   const { user, logout } = useUser();
   const location = useLocation();
+  const currentDate = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const [newsCategories, setNewsCategories] = useState<CategoryRow[]>([]);
+
+  useEffect(() => {
+    getCategories().then(setNewsCategories).catch(() => setNewsCategories([]));
+  }, []);
+
+  const getInterestSlug = (interest: string) => {
+    const byName = newsCategories.find((c) => c.name.toLowerCase() === interest.toLowerCase());
+    if (byName) return byName.slug;
+    const bySlug = newsCategories.find((c) => c.slug.toLowerCase() === interest.toLowerCase());
+    if (bySlug) return bySlug.slug;
+    return interest.toLowerCase().replace(/\s+/g, "-");
+  };
 
   const navLinkClass = (href: string) => {
     const isActive =
@@ -39,12 +48,11 @@ export function Header() {
         {/* Top bar */}
         <div className="flex items-center justify-between py-1 border-b">
           <div className="flex items-center gap-4 text-sm">
-            <span className="text-muted-foreground">Thursday, February 19, 2026</span>
+            <span className="text-muted-foreground">{currentDate}</span>
           </div>
           <div className="flex items-center gap-4">
             {!user ? (
               <>
-                <Link to="/subscription" className="text-sm hover:underline">Subscribe</Link>
                 <Link to="/login" className="text-sm hover:underline">Sign In</Link>
                 <Link to="/signup" className="px-4 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700">
                   Create Account
@@ -143,45 +151,21 @@ export function Header() {
                   </button>
                   <div className="absolute left-1/2 -translate-x-1/2 mt-2 w-56 bg-white border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
                     <ul className="py-2 text-sm">
-                      <li>
-                        <Link to="/category/world" className="block px-4 py-2 hover:bg-gray-100">
-                          World
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/category/politics" className="block px-4 py-2 hover:bg-gray-100">
-                          Politics
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/category/business" className="block px-4 py-2 hover:bg-gray-100">
-                          Business
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/category/technology" className="block px-4 py-2 hover:bg-gray-100">
-                          Technology
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/category/sports" className="block px-4 py-2 hover:bg-gray-100">
-                          Sports
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/category/science" className="block px-4 py-2 hover:bg-gray-100">
-                          Science
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/category/culture" className="block px-4 py-2 hover:bg-gray-100">
-                          Culture
-                        </Link>
-                      </li>
+                      {newsCategories.length === 0 ? (
+                        <li className="px-4 py-2 text-muted-foreground">No categories available</li>
+                      ) : (
+                        newsCategories.map((category) => (
+                          <li key={category.id}>
+                            <Link to={`/category/${category.slug}`} className="block px-4 py-2 hover:bg-gray-100">
+                              {category.name}
+                            </Link>
+                          </li>
+                        ))
+                      )}
                     </ul>
                   </div>
                 </li>
-                {(user.role === "free" || user.role === "premium") && user.interests && user.interests.length > 0 && (
+                {user && (
                   <li className="relative group">
                     <button className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm text-gray-700 hover:bg-gray-100">
                       My Interests
@@ -189,19 +173,27 @@ export function Header() {
                     </button>
                     <div className="absolute left-0 mt-2 w-56 bg-white border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
                       <ul className="py-2 text-sm">
-                        {user.interests.map((interest) => {
-                          const slug = INTEREST_CATEGORY_SLUGS[interest] ?? interest.toLowerCase().replace(/\s+/g, "-");
-                          return (
-                            <li key={interest}>
-                              <Link
-                                to={`/category/${slug}`}
-                                className="block px-4 py-2 hover:bg-gray-100"
-                              >
-                                {interest}
-                              </Link>
-                            </li>
-                          );
-                        })}
+                        {user.interests && user.interests.length > 0 ? (
+                          user.interests.map((interest) => {
+                            const slug = getInterestSlug(interest);
+                            return (
+                              <li key={interest}>
+                                <Link
+                                  to={`/category/${slug}`}
+                                  className="block px-4 py-2 hover:bg-gray-100"
+                                >
+                                  {interest}
+                                </Link>
+                              </li>
+                            );
+                          })
+                        ) : (
+                          <li>
+                            <Link to="/profile" className="block px-4 py-2 hover:bg-gray-100 text-muted-foreground">
+                              Choose your interests
+                            </Link>
+                          </li>
+                        )}
                       </ul>
                     </div>
                   </li>
@@ -221,6 +213,13 @@ export function Header() {
                     >
                       <Upload className="w-4 h-4" />
                       Upload Article
+                    </Link>
+                  </li>
+                )}
+                {user.role === "expert" && (
+                  <li>
+                    <Link to="/expert-dashboard" className={`${navLinkClass("/expert-dashboard")} font-semibold`}>
+                      Expert Dashboard
                     </Link>
                   </li>
                 )}

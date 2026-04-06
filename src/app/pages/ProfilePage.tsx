@@ -5,19 +5,11 @@ import { Link } from "react-router";
 import { upsertUserProfile, getCurrentUserWithInterests } from "../../lib/api/auth";
 import { setUserInterests } from "../../lib/api/userInterests";
 import { submitExpertApplication } from "../../lib/api/expertApplications";
+import { getCategories } from "../../lib/api/categories";
 import { supabase } from "../../lib/supabase";
 import { UserAvatar } from "../components/UserAvatar";
 import { PROFILE_PHOTO_OPTIONS } from "../../lib/profilePhotos";
-
-const EXPERTISE_LABELS: Record<string, string> = {
-  medicine: "Medicine & Healthcare",
-  science: "Science & Research",
-  technology: "Technology & Engineering",
-  economics: "Economics & Finance",
-  law: "Law & Legal Studies",
-  journalism: "Journalism & Media",
-  other: "Other",
-};
+import type { CategoryRow } from "../../lib/types/database";
 
 export function ProfilePage() {
   const { user, setUser } = useUser();
@@ -27,12 +19,13 @@ export function ProfilePage() {
   const [formData, setFormData] = useState({
     name: user?.name || "",
     email: user?.email || "",
+    age: user?.age?.toString() || "",
     location: user?.location || "",
     gender: user?.gender || "",
     interests: (user?.interests || []) as string[]
   });
   const [expertApplication, setExpertApplication] = useState({
-    expertise: "",
+    expertise: [] as string[],
     credentials: "",
     experience: "",
     proofDocument: null as File | null
@@ -47,6 +40,8 @@ export function ProfilePage() {
   const [expertSubmitting, setExpertSubmitting] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [avatarSaving, setAvatarSaving] = useState(false);
+  const [expertiseCategories, setExpertiseCategories] = useState<CategoryRow[]>([]);
+  const [approvedExpertiseAreas, setApprovedExpertiseAreas] = useState<string[]>([]);
 
   useEffect(() => {
     if (user) {
@@ -54,12 +49,44 @@ export function ProfilePage() {
         ...prev,
         name: user.name,
         email: user.email,
+        age: user.age?.toString() || "",
         gender: user.gender || "",
         location: user.location || "",
         interests: user.interests || [],
       }));
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    getCategories().then(setExpertiseCategories).catch(() => setExpertiseCategories([]));
+  }, []);
+
+  useEffect(() => {
+    if (!user?.id || user.role !== "expert") {
+      setApprovedExpertiseAreas([]);
+      return;
+    }
+    supabase
+      .from("expert_applications")
+      .select("expertise")
+      .eq("user_id", user.id)
+      .eq("status", "approved")
+      .then(({ data }) => {
+        const areas = Array.from(
+          new Set(
+            (data ?? [])
+              .flatMap((row) =>
+                ((row as { expertise?: string | null }).expertise ?? "")
+                  .split(",")
+                  .map((value) => value.trim())
+              )
+              .filter((value) => value.length > 0)
+          )
+        );
+        setApprovedExpertiseAreas(areas);
+      })
+      .catch(() => setApprovedExpertiseAreas([]));
+  }, [user?.id, user?.role]);
 
   if (!user) {
     return (
@@ -78,6 +105,11 @@ export function ProfilePage() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    const parsedAge = formData.age.trim() ? Number(formData.age) : null;
+    if (parsedAge !== null && (!Number.isFinite(parsedAge) || parsedAge < 13 || parsedAge > 120)) {
+      alert("Please enter a valid age between 13 and 120.");
+      return;
+    }
     setProfileSaving(true);
     try {
       await upsertUserProfile({
@@ -86,9 +118,10 @@ export function ProfilePage() {
         name: formData.name,
         avatar: user.avatar ?? null,
         gender: formData.gender || null,
+        age: parsedAge,
         location: formData.location || null,
       });
-      if (formData.interests.length) {
+      if (user.role !== "expert") {
         await setUserInterests(user.id, formData.interests);
       }
       const data = await getCurrentUserWithInterests();
@@ -100,6 +133,7 @@ export function ProfilePage() {
           role: data.profile.role as "guest" | "free" | "premium" | "expert" | "admin",
           avatar: data.profile.avatar ?? undefined,
           gender: data.profile.gender ?? undefined,
+          age: data.profile.age ?? undefined,
           location: (data.profile as { location?: string | null }).location ?? undefined,
           interests: data.interests.length ? data.interests : undefined,
         });
@@ -116,13 +150,19 @@ export function ProfilePage() {
   const handleExpertApplication = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    const expertiseLabel = EXPERTISE_LABELS[expertApplication.expertise] || expertApplication.expertise;
+    const selectedCategoryNames = expertApplication.expertise
+      .map((slug) => expertiseCategories.find((c) => c.slug === slug)?.name ?? "")
+      .filter((name) => name.length > 0);
+    if (selectedCategoryNames.length === 0) {
+      alert("Please select at least one valid area of expertise.");
+      return;
+    }
     const credentials = [expertApplication.credentials, expertApplication.experience].filter(Boolean).join("\n\n");
     setExpertSubmitting(true);
     try {
-      await submitExpertApplication(user.id, expertiseLabel, credentials);
+      await submitExpertApplication(user.id, selectedCategoryNames.join(", "), credentials);
       setShowExpertApplication(false);
-      setExpertApplication({ expertise: "", credentials: "", experience: "", proofDocument: null });
+      setExpertApplication({ expertise: [], credentials: "", experience: "", proofDocument: null });
       alert("Expert verification application submitted! We'll review it within 5-7 business days.");
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to submit application.");
@@ -148,6 +188,7 @@ export function ProfilePage() {
         name: user.name,
         avatar: avatarPath,
         gender: user.gender ?? null,
+        age: user.age ?? null,
         location: user.location ?? null,
       });
       const data = await getCurrentUserWithInterests();
@@ -159,6 +200,7 @@ export function ProfilePage() {
           role: data.profile.role as "guest" | "free" | "premium" | "expert" | "admin",
           avatar: data.profile.avatar ?? undefined,
           gender: data.profile.gender ?? undefined,
+          age: data.profile.age ?? undefined,
           location: (data.profile as { location?: string | null }).location ?? undefined,
           interests: data.interests.length ? data.interests : undefined,
         });
@@ -271,13 +313,13 @@ export function ProfilePage() {
                   Upgrade to Premium
                 </Link>
               )}
-              {user.role === "premium" && user.role !== "expert" && (
+              {(user.role === "premium" || user.role === "expert") && (
                 <button
                   onClick={() => setShowExpertApplication(true)}
                   className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
                 >
                   <Shield className="w-4 h-4" />
-                  Apply as Expert
+                  {user.role === "expert" ? "Apply for Another Expertise" : "Apply as Expert"}
                 </button>
               )}
               {user.role === "admin" && (
@@ -354,42 +396,83 @@ export function ProfilePage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">Interests</label>
-                  <p className="text-xs text-muted-foreground mb-2">
-                    These are used to personalize your feed. Click to add or remove.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {["World News","Politics","Business","Technology","Sports","Science","Health","Culture","Entertainment","Environment"].map((interest) => {
-                      const active = formData.interests.includes(interest);
-                      return (
-                        <button
-                          key={interest}
-                          type="button"
-                          disabled={!isEditing}
-                          onClick={() => {
-                            if (!isEditing) return;
-                            setFormData({
-                              ...formData,
-                              interests: active
-                                ? formData.interests.filter((i) => i !== interest)
-                                : [...formData.interests, interest],
-                            });
-                          }}
-                          className={`px-3 py-1 rounded-full text-xs border ${
-                            active ? "bg-red-50 border-red-600 text-red-700" : "border-gray-200 text-gray-700"
-                          } ${!isEditing ? "opacity-60 cursor-default" : "hover:bg-gray-50"}`}
-                        >
-                          {interest}
-                        </button>
-                      );
-                    })}
-                    {formData.interests.length === 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        No interests selected yet.
-                      </span>
-                    )}
-                  </div>
+                  <label className="block text-sm font-medium mb-2">Age</label>
+                  <input
+                    type="number"
+                    min={13}
+                    max={120}
+                    value={formData.age}
+                    onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+                    disabled={!isEditing}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 disabled:bg-gray-50"
+                    placeholder="Age"
+                  />
                 </div>
+
+                {user.role === "expert" ? (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Area of Expertise</label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      This is taken from your approved expert verification application.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {approvedExpertiseAreas.map((area) => (
+                        <span key={area} className="px-3 py-1 rounded-full text-xs border border-blue-200 bg-blue-50 text-blue-700">
+                          {area}
+                        </span>
+                      ))}
+                      {approvedExpertiseAreas.length === 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          No approved expertise area found yet.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Interests</label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      These are used to personalize your feed. Click to add or remove.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {expertiseCategories.map((category) => {
+                        const interest = category.name;
+                        const active = formData.interests.includes(interest);
+                        return (
+                          <button
+                            key={category.id}
+                            type="button"
+                            disabled={!isEditing}
+                            onClick={() => {
+                              if (!isEditing) return;
+                              setFormData({
+                                ...formData,
+                                interests: active
+                                  ? formData.interests.filter((i) => i !== interest)
+                                  : [...formData.interests, interest],
+                              });
+                            }}
+                            className={`px-3 py-1 rounded-full text-xs border ${
+                              active ? "bg-red-50 border-red-600 text-red-700" : "border-gray-200 text-gray-700"
+                            } ${!isEditing ? "opacity-60 cursor-default" : "hover:bg-gray-50"}`}
+                          >
+                            {interest}
+                          </button>
+                        );
+                      })}
+                      {expertiseCategories.length === 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          No categories available yet.
+                        </span>
+                      )}
+                      {formData.interests.length === 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          No interests selected yet.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium mb-2">Location</label>
@@ -508,29 +591,46 @@ export function ProfilePage() {
         {showExpertApplication && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <h2 className="text-2xl font-semibold mb-4">Apply for Expert Verification</h2>
+              <h2 className="text-2xl font-semibold mb-4">
+                {user.role === "expert" ? "Apply for Additional Expertise" : "Apply for Expert Verification"}
+              </h2>
               <p className="text-sm text-muted-foreground mb-6">
-                Become a verified expert to review and verify articles in your field of expertise.
+                {user.role === "expert"
+                  ? "Submit another expertise area to expand the categories you can review."
+                  : "Become a verified expert to review and verify articles in your field of expertise."}
               </p>
 
               <form onSubmit={handleExpertApplication} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">Area of Expertise *</label>
-                  <select
-                    value={expertApplication.expertise}
-                    onChange={(e) => setExpertApplication({ ...expertApplication, expertise: e.target.value })}
-                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    required
-                  >
-                    <option value="">Select your field</option>
-                    <option value="medicine">Medicine & Healthcare</option>
-                    <option value="science">Science & Research</option>
-                    <option value="technology">Technology & Engineering</option>
-                    <option value="economics">Economics & Finance</option>
-                    <option value="law">Law & Legal Studies</option>
-                    <option value="journalism">Journalism & Media</option>
-                    <option value="other">Other</option>
-                  </select>
+                  <p className="text-xs text-muted-foreground mb-2">Select one or more categories.</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {expertiseCategories.map((category) => {
+                      const active = expertApplication.expertise.includes(category.slug);
+                      return (
+                        <button
+                          key={category.id}
+                          type="button"
+                          onClick={() =>
+                            setExpertApplication((prev) => ({
+                              ...prev,
+                              expertise: active
+                                ? prev.expertise.filter((item) => item !== category.slug)
+                                : [...prev.expertise, category.slug],
+                            }))
+                          }
+                          className={`px-3 py-2 rounded border text-sm text-left ${
+                            active ? "border-blue-600 bg-blue-50 text-blue-700" : "border-gray-200 hover:bg-gray-50"
+                          }`}
+                        >
+                          {category.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {expertiseCategories.length === 0 && (
+                    <p className="text-xs text-muted-foreground mt-2">No categories available yet.</p>
+                  )}
                 </div>
 
                 <div>
@@ -615,7 +715,7 @@ export function ProfilePage() {
                 <li>AI-powered article summaries</li>
                 <li>Bookmark articles for later</li>
                 <li>Social media sharing features</li>
-                <li>Ad-free reading experience</li>
+                <li>Priority customer support</li>
               </ul>
               <p className="text-sm text-muted-foreground mb-6">
                 Your premium access will continue until <strong>March 19, 2026</strong>.

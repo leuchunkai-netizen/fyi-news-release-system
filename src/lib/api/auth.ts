@@ -46,6 +46,7 @@ export async function upsertUserProfile(params: {
   role?: UserRole;
   avatar?: string | null;
   gender?: string | null;
+  age?: number | null;
   location?: string | null;
 }) {
   const payload: {
@@ -55,6 +56,7 @@ export async function upsertUserProfile(params: {
     role?: UserRole;
     avatar: string | null;
     gender: string | null;
+    age: number | null;
     location: string | null;
     updated_at: string;
   } = {
@@ -63,6 +65,7 @@ export async function upsertUserProfile(params: {
     name: params.name ?? params.email.split("@")[0],
     avatar: params.avatar ?? null,
     gender: params.gender ?? null,
+    age: params.age ?? null,
     location: params.location ?? null,
     updated_at: new Date().toISOString(),
   };
@@ -85,7 +88,7 @@ export async function upsertUserProfile(params: {
 export async function signUp(
   email: string,
   password: string,
-  options?: { name?: string; role?: UserRole; interests?: string[] }
+  options?: { name?: string; role?: UserRole; interests?: string[]; gender?: string | null; age?: number | null; location?: string | null }
 ) {
   const name = options?.name ?? email.split("@")[0];
   const redirectTo =
@@ -113,6 +116,9 @@ export async function signUp(
         email: authData.user.email!,
         name: name ?? authData.user.user_metadata?.name ?? authData.user.email?.split("@")[0],
         role: options?.role ?? "free",
+        gender: options?.gender ?? null,
+        age: options?.age ?? null,
+        location: options?.location ?? null,
       });
       // Save interests only if we have a session (e.g. email confirmation off). Don't fail signup if this fails.
       if (options?.interests?.length) {

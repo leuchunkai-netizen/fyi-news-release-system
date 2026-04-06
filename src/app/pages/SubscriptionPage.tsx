@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { Check } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
+import { useNavigate } from "react-router";
 import { useUser } from "../context/UserContext";
 
 export function SubscriptionPage() {
   const { user } = useUser();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -14,6 +16,17 @@ export function SubscriptionPage() {
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    // Guests should subscribe from the landing page, not a separate page.
+    if (!user) {
+      navigate("/#subscription-section", { replace: true });
+    }
+  }, [user, navigate]);
+
+  if (!user) {
+    return null;
+  }
 
   return (
     <div className="container mx-auto px-4 py-16">
@@ -102,10 +115,6 @@ export function SubscriptionPage() {
             <li className="flex items-start gap-2">
               <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
               <span className="text-sm">Share on social media</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-              <span className="text-sm">Ad-free experience</span>
             </li>
             <li className="flex items-start gap-2">
               <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />

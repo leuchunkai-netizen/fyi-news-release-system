@@ -5,7 +5,16 @@ import { useUser } from "../context/UserContext";
 import { upgradeToPremium, getCurrentUserWithInterests } from "../../lib/api/auth";
 
 function profileToUser(
-  profile: { id: string; name: string; email: string; role: string; avatar?: string | null; gender?: string | null },
+  profile: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    avatar?: string | null;
+    gender?: string | null;
+    age?: number | null;
+    location?: string | null;
+  },
   interests: string[]
 ) {
   return {
@@ -15,6 +24,8 @@ function profileToUser(
     role: profile.role as "guest" | "free" | "premium" | "expert" | "admin",
     avatar: profile.avatar ?? undefined,
     gender: profile.gender ?? undefined,
+    age: profile.age ?? undefined,
+    location: profile.location ?? undefined,
     interests: interests.length ? interests : undefined,
   };
 }

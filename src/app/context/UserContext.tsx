@@ -10,6 +10,7 @@ export interface User {
   role: UserRole;
   avatar?: string;
   gender?: string;
+  age?: number;
   location?: string;
   interests?: string[];
 }
@@ -31,6 +32,7 @@ function profileToUser(
     role: UserRole;
     avatar?: string | null;
     gender?: string | null;
+    age?: number | null;
     location?: string | null;
   },
   interests: string[]
@@ -42,6 +44,7 @@ function profileToUser(
     role: profile.role,
     avatar: profile.avatar ?? undefined,
     gender: profile.gender ?? undefined,
+    age: profile.age ?? undefined,
     location: profile.location ?? undefined,
     interests: interests.length ? interests : undefined,
   };

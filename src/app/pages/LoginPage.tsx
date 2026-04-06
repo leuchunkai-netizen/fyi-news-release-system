@@ -27,6 +27,8 @@ export function LoginPage() {
           role: data.profile.role,
           avatar: data.profile.avatar ?? undefined,
           gender: data.profile.gender ?? undefined,
+          age: data.profile.age ?? undefined,
+          location: data.profile.location ?? undefined,
           interests: data.interests.length ? data.interests : undefined,
         };
         setUser(nextUser);

@@ -109,7 +109,7 @@ export function BookmarksPage() {
                 <ArticleCard
                   id={article.id}
                   imageUrl={article.image_url ?? ""}
-                  category={categoryMap.get(article.category_id ?? "") ?? "News"}
+                  category={categoryMap.get(article.category_id ?? "") ?? "Uncategorized"}
                   title={article.title}
                   excerpt={article.excerpt ?? ""}
                   author={article.author_display_name ?? "Unknown"}

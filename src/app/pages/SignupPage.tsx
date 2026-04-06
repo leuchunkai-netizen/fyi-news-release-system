@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useUser } from "../context/UserContext";
 import { signUp, getCurrentUserWithInterests, getAuthErrorMessage } from "@/lib/api/auth";
+import { getCategories } from "../../lib/api/categories";
+import type { CategoryRow } from "../../lib/types/database";
 import { Check } from "lucide-react";
 
 export function SignupPage() {
@@ -13,22 +15,13 @@ export function SignupPage() {
     name: "",
     email: "",
     password: "",
-    confirmPassword: ""
+    confirmPassword: "",
+    gender: "",
+    age: "",
+    location: "",
   });
   const [interests, setInterests] = useState<string[]>([]);
-
-  const availableInterests = [
-    "World News",
-    "Politics",
-    "Business",
-    "Technology",
-    "Sports",
-    "Science",
-    "Health",
-    "Culture",
-    "Entertainment",
-    "Environment"
-  ];
+  const [availableInterests, setAvailableInterests] = useState<CategoryRow[]>([]);
 
   const toggleInterest = (interest: string) => {
     setInterests(prev =>
@@ -48,6 +41,10 @@ export function SignupPage() {
     }
   }, [user, navigate]);
 
+  useEffect(() => {
+    getCategories().then(setAvailableInterests).catch(() => setAvailableInterests([]));
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -64,12 +61,20 @@ export function SignupPage() {
         setError("Passwords do not match.");
         return;
       }
+      const parsedAge = formData.age.trim() ? Number(formData.age) : null;
+      if (parsedAge !== null && (!Number.isFinite(parsedAge) || parsedAge < 13 || parsedAge > 120)) {
+        setError("Please enter a valid age between 13 and 120.");
+        return;
+      }
       setSubmitting(true);
       try {
         await signUp(formData.email, formData.password, {
           name: formData.name,
           role: accountType === "premium" ? "premium" : "free",
           interests,
+          gender: formData.gender || null,
+          age: parsedAge,
+          location: formData.location || null,
         });
         // If Supabase set a session (e.g. email confirmation off), load profile into context
         try {
@@ -82,6 +87,8 @@ export function SignupPage() {
               role: data.profile.role,
               avatar: data.profile.avatar ?? undefined,
               gender: data.profile.gender ?? undefined,
+              age: data.profile.age ?? undefined,
+              location: data.profile.location ?? undefined,
               interests: data.interests.length ? data.interests : undefined,
             });
           }
@@ -194,6 +201,46 @@ export function SignupPage() {
                   />
                 </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Gender</label>
+                    <select
+                      value={formData.gender}
+                      onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                      className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 text-sm"
+                    >
+                      <option value="">Select gender</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Non-binary">Non-binary</option>
+                      <option value="Prefer not to say">Prefer not to say</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Age</label>
+                    <input
+                      type="number"
+                      min={13}
+                      max={120}
+                      value={formData.age}
+                      onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+                      className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
+                      placeholder="e.g. 28"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Location</label>
+                  <input
+                    type="text"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
+                    placeholder="City, Country"
+                  />
+                </div>
+
                 <div className="space-y-4">
                   <label className="block text-sm font-medium">Account Type</label>
                   <div className="grid grid-cols-2 gap-4">
@@ -229,25 +276,28 @@ export function SignupPage() {
               <div>
                 <h3 className="font-semibold mb-4">Select Your Interests</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Choose topics you're interested in to personalize your feed
+                  Choose categories you're interested in to personalize your feed
                 </p>
                 <div className="grid grid-cols-2 gap-3">
-                  {availableInterests.map((interest) => (
+                  {availableInterests.map((category) => (
                     <button
-                      key={interest}
+                      key={category.id}
                       type="button"
-                      onClick={() => toggleInterest(interest)}
+                      onClick={() => toggleInterest(category.name)}
                       className={`p-3 border-2 rounded-lg text-left flex items-center justify-between ${
-                        interests.includes(interest) ? "border-red-600 bg-red-50" : "border-gray-200"
+                        interests.includes(category.name) ? "border-red-600 bg-red-50" : "border-gray-200"
                       }`}
                     >
-                      <span>{interest}</span>
-                      {interests.includes(interest) && (
+                      <span>{category.name}</span>
+                      {interests.includes(category.name) && (
                         <Check className="w-5 h-5 text-red-600" />
                       )}
                     </button>
                   ))}
                 </div>
+                {availableInterests.length === 0 && (
+                  <p className="text-sm text-muted-foreground mt-3">No categories available yet.</p>
+                )}
               </div>
             )}
 

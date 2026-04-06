@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router";
 import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info, Eye, Trash2 } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { getArticleById, incrementArticleViews, getCredibilityAnalysis } from "../../lib/api/articles";
-import { getComments, addComment, deleteComment } from "../../lib/api/comments";
+import { getComments, addComment, deleteComment, reportComment } from "../../lib/api/comments";
 import { addBookmark, removeBookmark, isBookmarked } from "../../lib/api/bookmarks";
 import type { ArticleWithCategory } from "../../lib/api/articles";
 import type { CommentWithAuthor } from "../../lib/api/comments";
@@ -22,10 +22,46 @@ function formatTimeAgo(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
+interface RejectionFinding {
+  snippet: string;
+  issue: string;
+  reason: string;
+  severity: "high" | "medium";
+}
+
+function stripHtml(input: string): string {
+  return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function buildSampleRejectionFindings(content: string, concerns: string[], warnings: string[]): RejectionFinding[] {
+  const plain = stripHtml(content);
+  const sentences = (plain.match(/[^.!?]+[.!?]?/g) ?? [])
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 40);
+
+  const fallbackSnippets = [
+    "A core claim in this article appears definitive but lacks verifiable sourcing in the submitted text.",
+    "Another key statement relies on broad certainty without enough supporting evidence or attribution.",
+  ];
+
+  return [0, 1].map((index) => {
+    const snippet = sentences[index] ?? fallbackSnippets[index];
+    const guidance = warnings[index] ?? concerns[index] ?? "This claim needs stronger evidence from reliable sources.";
+    const hasStrongClaimSignal = /\b(always|never|guarantee|proven|cure|100%|\d+%)\b/i.test(snippet);
+    return {
+      snippet,
+      issue: hasStrongClaimSignal ? "Potentially over-confident or absolute claim" : "Insufficiently supported factual claim",
+      reason: guidance,
+      severity: hasStrongClaimSignal ? "high" : "medium",
+    };
+  });
+}
+
 export function ArticleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useUser();
   const [article, setArticle] = useState<ArticleWithCategory | null>(null);
+  const [guestArticleLimitReached, setGuestArticleLimitReached] = useState(false);
   const [comments, setComments] = useState<CommentWithAuthor[]>([]);
   const [comment, setComment] = useState("");
   const [showAISummary, setShowAISummary] = useState(false);
@@ -39,6 +75,7 @@ export function ArticleDetailPage() {
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
+  const [reportingCommentId, setReportingCommentId] = useState<string | null>(null);
   const [credibilityAnalysis, setCredibilityAnalysis] = useState<Awaited<ReturnType<typeof getCredibilityAnalysis>>>(null);
 
   useEffect(() => {
@@ -46,9 +83,11 @@ export function ArticleDetailPage() {
       setLoading(false);
       return;
     }
+    // stop state updates if component unmounts while requests are running
     let cancelled = false;
     (async () => {
       try {
+        // load the article first so we can render core content asap
         const art = await getArticleById(id);
         if (cancelled) return;
         if (!art) {
@@ -58,7 +97,7 @@ export function ArticleDetailPage() {
 
         setArticle(art as ArticleWithCategory);
 
-        // Best-effort side effects; don't hide article if they fail (e.g. RLS).
+        // run extra data updates, but do not fail the whole page if one fails
         try {
           await incrementArticleViews(id);
           if (!cancelled) {
@@ -103,9 +142,39 @@ export function ArticleDetailPage() {
     return () => { cancelled = true; };
   }, [id, user?.id]);
 
+  useEffect(() => {
+    if (user || !article || article.status !== "published") {
+      setGuestArticleLimitReached(false);
+      return;
+    }
+
+    try {
+      const key = "guest_viewed_article_ids";
+      const raw = window.localStorage.getItem(key);
+      const viewed = raw ? (JSON.parse(raw) as string[]) : [];
+
+      if (viewed.includes(article.id)) {
+        setGuestArticleLimitReached(false);
+        return;
+      }
+
+      if (viewed.length >= 3) {
+        setGuestArticleLimitReached(true);
+        return;
+      }
+
+      const updated = [...viewed, article.id];
+      window.localStorage.setItem(key, JSON.stringify(updated));
+      setGuestArticleLimitReached(false);
+    } catch {
+      setGuestArticleLimitReached(false);
+    }
+  }, [user?.id, article?.id, article?.status]);
+
   const handleCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !id || !comment.trim()) return;
+    // post comment, then refresh list from db so counts/order stay accurate
     setCommentSubmitting(true);
     try {
       await addComment(id, user.id, comment.trim());
@@ -121,6 +190,7 @@ export function ArticleDetailPage() {
 
   const handleBookmarkToggle = async () => {
     if (!user || user.role !== "premium" || !id) return;
+    // simple toggle flow: remove if saved, add if not
     try {
       if (bookmarked) {
         await removeBookmark(user.id, id);
@@ -136,6 +206,7 @@ export function ArticleDetailPage() {
 
   const handleReport = async () => {
     if (!user || !id || reportSent || reportSubmitting) return;
+    // require a reason so moderators know why it was flagged
     const reason = reportReason.trim();
     if (!reason) {
       setReportError("Please provide a reason before flagging.");
@@ -160,6 +231,7 @@ export function ArticleDetailPage() {
     if (!user || deletingCommentId || !id) return;
     setDeletingCommentId(commentId);
     try {
+      // delete in db first, then reload comments to reflect final server state
       await deleteComment(commentId);
       const refreshed = await getComments(id);
       setComments(refreshed);
@@ -167,6 +239,25 @@ export function ArticleDetailPage() {
       alert((err as Error)?.message ?? "Could not delete comment.");
     } finally {
       setDeletingCommentId(null);
+    }
+  };
+
+  const handleReportComment = async (commentId: string, commentAuthorId: string) => {
+    if (!user || reportingCommentId) return;
+    if (commentAuthorId === user.id) return;
+
+    const reasonInput = window.prompt("Why are you flagging this comment?");
+    const reason = reasonInput?.trim() ?? "";
+    if (!reason) return;
+
+    setReportingCommentId(commentId);
+    try {
+      await reportComment(commentId, user.id, reason);
+      alert("Report submitted. Admins will review this comment.");
+    } catch (err) {
+      alert((err as Error)?.message ?? "Could not flag this comment.");
+    } finally {
+      setReportingCommentId(null);
     }
   };
 
@@ -187,9 +278,31 @@ export function ArticleDetailPage() {
     );
   }
 
-  // Suspended/non-published articles stay visible in admin moderation,
-  // but should be hidden from regular readers.
-  if (article.status !== "published" && user?.role !== "admin") {
+  if (guestArticleLimitReached) {
+    return (
+      <div className="container mx-auto px-4 py-16 text-center">
+        <h1 className="text-3xl font-semibold mb-3">Free limit reached</h1>
+        <p className="text-muted-foreground mb-6">
+          Guests can view up to 3 articles. Sign in or create an account to continue reading.
+        </p>
+        <div className="flex items-center justify-center gap-3">
+          <Link to="/login" className="px-5 py-2 border rounded-lg hover:bg-gray-50">
+            Sign In
+          </Link>
+          <Link to="/signup" className="px-5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+            Create Account
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Non-published articles are hidden from regular readers.
+  // Exceptions: admins and authors can view their own pending/rejected articles.
+  const canViewUnpublished =
+    user?.role === "admin" ||
+    ((article.status === "pending" || article.status === "rejected") && user?.id === article.author_id);
+  if (article.status !== "published" && !canViewUnpublished) {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-2xl font-semibold mb-2">Article not available</h1>
@@ -201,7 +314,7 @@ export function ArticleDetailPage() {
     );
   }
 
-  const categoryName = (article as ArticleWithCategory).category?.name ?? "News";
+  const categoryName = (article as ArticleWithCategory).category?.name ?? "Uncategorized";
   const categorySlug = (article as ArticleWithCategory).category?.slug ?? "all";
   const expertScore = article.credibility_score ?? null;
   const aiScore = credibilityAnalysis?.score ?? null;
@@ -251,6 +364,15 @@ export function ArticleDetailPage() {
         ];
 
   const warnings = (credibilityAnalysis?.warnings as string[] | undefined) ?? [];
+  const rejectionReasonSummary =
+    article.status === "rejected"
+      ? article.rejection_reason?.trim() ||
+        "This article was rejected because parts of the content could not be sufficiently verified with reliable evidence."
+      : null;
+  const rejectionFindings =
+    article.status === "rejected"
+      ? buildSampleRejectionFindings(article.content ?? "", concerns, warnings)
+      : [];
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -446,6 +568,49 @@ export function ArticleDetailPage() {
           </div>
         )}
 
+        {article.status === "rejected" && (
+          <div className="mb-8 border-2 border-red-200 rounded-lg overflow-hidden">
+            <div className="bg-red-50 border-b border-red-200 px-6 py-4">
+              <h3 className="font-semibold text-red-900 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-700" />
+                AI Rejection Analysis (Sample)
+              </h3>
+              <p className="text-sm text-red-800 mt-1">
+                This sample explains why the article may have been rejected and highlights content that likely triggered low-credibility checks.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="p-3 border border-red-200 bg-red-50 rounded">
+                <p className="text-sm text-red-800">
+                  <span className="font-semibold">Rejection reason:</span> {rejectionReasonSummary}
+                </p>
+              </div>
+              {rejectionFindings.map((finding, index) => (
+                <div
+                  key={index}
+                  className={`rounded border p-4 ${finding.severity === "high" ? "border-red-300 bg-red-50" : "border-yellow-300 bg-yellow-50"}`}
+                >
+                  <p className="text-xs uppercase tracking-wide font-semibold mb-2">
+                    Highlight {index + 1} • {finding.severity === "high" ? "High Risk" : "Medium Risk"}
+                  </p>
+                  <blockquote className="text-sm italic border-l-4 border-current pl-3 mb-2">
+                    "{finding.snippet}"
+                  </blockquote>
+                  <p className="text-sm">
+                    <span className="font-semibold">Issue:</span> {finding.issue}
+                  </p>
+                  <p className="text-sm">
+                    <span className="font-semibold">Why flagged:</span> {finding.reason}
+                  </p>
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                Tip: Add citations, attribute expert statements, and avoid absolute wording unless you can provide high-quality evidence.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div
           className="prose prose-lg max-w-none mb-12"
           dangerouslySetInnerHTML={{ __html: article.content || "" }}
@@ -583,23 +748,40 @@ export function ArticleDetailPage() {
                     <p className="font-semibold">{c.user?.name ?? "User"}</p>
                     <span className="text-sm text-muted-foreground">{formatTimeAgo(c.created_at)}</span>
                     </div>
-                    {user && c.user_id === user.id && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const confirmed = window.confirm(
-                            "Delete this comment? This action cannot be undone."
-                          );
-                          if (!confirmed) return;
-                          handleDeleteOwnComment(c.id);
-                        }}
-                        disabled={deletingCommentId === c.id}
-                        className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 disabled:opacity-50"
-                        title="Delete your comment"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        {deletingCommentId === c.id ? "Deleting..." : "Delete"}
-                      </button>
+                    {user && (
+                      <div className="flex items-center gap-3">
+                        {c.user_id !== user.id && (
+                          <button
+                            type="button"
+                            onClick={() => handleReportComment(c.id, c.user_id)}
+                            disabled={reportingCommentId === c.id}
+                            className="inline-flex items-center gap-1 text-xs text-orange-600 hover:text-orange-700 disabled:opacity-50"
+                            title="Flag this comment"
+                          >
+                            <Flag className="w-3.5 h-3.5" />
+                            {reportingCommentId === c.id ? "Flagging..." : "Flag"}
+                          </button>
+                        )}
+                        {c.user_id === user.id && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              // quick safety check before permanent delete
+                              const confirmed = window.confirm(
+                                "Delete this comment? This action cannot be undone."
+                              );
+                              if (!confirmed) return;
+                              handleDeleteOwnComment(c.id);
+                            }}
+                            disabled={deletingCommentId === c.id}
+                            className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 disabled:opacity-50"
+                            title="Delete your comment"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            {deletingCommentId === c.id ? "Deleting..." : "Delete"}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                   <p className="text-sm mb-2">{c.content}</p>

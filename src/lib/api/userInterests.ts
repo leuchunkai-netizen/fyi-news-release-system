@@ -3,8 +3,6 @@ import { getCategories } from "./categories";
 
 /** Set user interests by category names (e.g. from signup form). Replaces existing. */
 export async function setUserInterests(userId: string, categoryNames: string[]) {
-  if (categoryNames.length === 0) return;
-
   const categories = await getCategories();
   const nameToId = new Map(categories.map((c) => [c.name.toLowerCase(), c.id]));
   const slugToId = new Map(categories.map((c) => [c.slug.toLowerCase(), c.id]));
@@ -14,9 +12,11 @@ export async function setUserInterests(userId: string, categoryNames: string[]) 
     const id = nameToId.get(name.toLowerCase()) ?? slugToId.get(name.toLowerCase().replace(/\s+/g, "-"));
     if (id) categoryIds.push(id);
   }
+
+  const { error: deleteError } = await supabase.from("user_interests").delete().eq("user_id", userId);
+  if (deleteError) throw deleteError;
   if (categoryIds.length === 0) return;
 
-  await supabase.from("user_interests").delete().eq("user_id", userId);
   const rows = categoryIds.map((category_id) => ({ user_id: userId, category_id }));
   const { error } = await supabase.from("user_interests").insert(rows);
   if (error) throw error;

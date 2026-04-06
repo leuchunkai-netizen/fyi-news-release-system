@@ -15,6 +15,7 @@ CREATE TABLE public.users (
   role varchar(20) NOT NULL DEFAULT 'free' CHECK (role IN ('guest','free','premium','expert','admin')),
   avatar varchar(500),
   gender varchar(50),
+  age int CHECK (age IS NULL OR (age >= 13 AND age <= 120)),
   status varchar(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended')),
   email_verified_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),

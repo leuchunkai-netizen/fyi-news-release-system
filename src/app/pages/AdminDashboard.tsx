@@ -130,6 +130,15 @@ export function AdminDashboard() {
   const reportsFiltered = searchTerm.trim()
     ? reports.filter((r) => r.article_title.toLowerCase().includes(searchTerm.toLowerCase()))
     : reports;
+  const tabTitleMap: Record<typeof activeTab, string> = {
+    users: "User Management",
+    articles: "Content Moderation",
+    comments: "Comment Moderation",
+    categories: "Category Management",
+    experts: "Expert Application Management",
+    guestLanding: "Guest Landing",
+    reports: "Flagged Content",
+  };
 
   const handleUserAction = async (userId: string, action: "suspend" | "unsuspend") => {
     try {
@@ -380,7 +389,7 @@ export function AdminDashboard() {
         <h1 className="text-3xl font-semibold mb-8">Admin Dashboard</h1>
 
         {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
           <div className="border rounded-lg p-6">
             <div className="flex items-center justify-between mb-2">
               <Users className="w-8 h-8 text-blue-600" />
@@ -409,11 +418,18 @@ export function AdminDashboard() {
             <p className="text-2xl font-bold">{loading ? "—" : expertApplications.filter((e) => e.status === "pending").length}</p>
             <p className="text-sm text-muted-foreground">Pending Expert Applications</p>
           </div>
+          <div className="border rounded-lg p-6">
+            <div className="flex items-center justify-between mb-2">
+              <Ban className="w-8 h-8 text-red-600" />
+            </div>
+            <p className="text-2xl font-bold">{loading ? "—" : reports.filter((r) => r.status === "pending").length}</p>
+            <p className="text-sm text-muted-foreground">Flagged Content</p>
+          </div>
         </div>
 
         {/* Tabs */}
-        <div className="border-b mb-6">
-          <div className="flex gap-4">
+        <div className="sticky top-[11rem] z-40 bg-background border-b mb-6 shadow-sm">
+          <div className="flex gap-4 overflow-x-auto py-2">
             <button
               onClick={() => setActiveTab("users")}
               className={`px-4 py-2 ${
@@ -506,6 +522,10 @@ export function AdminDashboard() {
               className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
             />
           </div>
+        </div>
+
+        <div className="mb-4">
+          <h2 className="text-2xl font-semibold">{tabTitleMap[activeTab]}</h2>
         </div>
 
         {/* User Management Tab */}
@@ -958,12 +978,6 @@ export function AdminDashboard() {
         {/* Expert Applications Tab */}
         {activeTab === "experts" && (
           <div className="border rounded-lg">
-            <div className="p-6 bg-blue-50 border-b">
-              <h3 className="font-semibold text-blue-900 mb-2">Expert Verification Applications</h3>
-              <p className="text-sm text-blue-700">
-                Review and approve users who have applied for expert verification status. Experts can review and verify articles in their field of expertise.
-              </p>
-            </div>
             <table className="w-full">
               <thead className="bg-gray-50 border-b">
                 <tr>
@@ -1027,18 +1041,8 @@ export function AdminDashboard() {
         {/* Guest Landing Tab - edit intro slides and video (admin only) */}
         {activeTab === "guestLanding" && (
           <div className="border rounded-lg space-y-8">
-            <div className="p-6 bg-amber-50 border-b">
-              <h3 className="font-semibold text-amber-900 mb-2">Guest home page content</h3>
-              <p className="text-sm text-amber-800">
-                This content is shown only to visitors who are not logged in. Edit the intro/feature slides and the video section below.
-              </p>
-            </div>
-
             <div className="p-6">
               <h4 className="font-semibold mb-4">Intro &amp; feature slides</h4>
-              <p className="text-sm text-muted-foreground mb-4">
-                These slides replace breaking news for guests. Order is preserved.
-              </p>
               <div className="space-y-4 mb-6">
                 {editingIntroSlides.map((slide, index) => (
                   <div key={index} className="border rounded-lg p-4 bg-gray-50 space-y-3">
@@ -1147,9 +1151,6 @@ export function AdminDashboard() {
 
             <div className="p-6 border-t">
               <h4 className="font-semibold mb-4">Video section</h4>
-              <p className="text-sm text-muted-foreground mb-4">
-                Optional intro video for guests. Paste a YouTube link (watch/share), an embed URL, or a video ID.
-              </p>
               <div className="space-y-3 max-w-3xl">
                 <input
                   type="text"
@@ -1207,21 +1208,11 @@ export function AdminDashboard() {
         {/* Flagged Content / Reports Tab */}
         {activeTab === "reports" && (
           <div className="border rounded-lg">
-            <div className="p-6 bg-red-50 border-b">
-              <h3 className="font-semibold text-red-900 mb-2">Flagged Articles</h3>
-              <p className="text-sm text-red-800">
-                These reports are created when readers flag articles as inappropriate or misleading.
-                Review each report and decide whether to suspend the article or ignore the report.
-              </p>
-              <p className="text-xs text-red-700 mt-1">
-                Suspended articles are not deleted. They remain visible in Content Moderation as flagged.
-              </p>
-              {reportsError && (
-                <p className="text-sm text-red-700 mt-2">
-                  {reportsError}
-                </p>
-              )}
-            </div>
+            {reportsError && (
+              <div className="px-6 pt-6">
+                <p className="text-sm text-red-700">{reportsError}</p>
+              </div>
+            )}
             <table className="w-full">
               <thead className="bg-gray-50 border-b">
                 <tr>
