@@ -13,7 +13,7 @@ const factCheckLLM = require("./factCheckLLM");
 const filters = require("../utils/filters");
 const vectorQueries = require("../db/vectorQueries");
 
-const TOP_EVIDENCE_FOR_LLM = 3;
+const TOP_EVIDENCE_FOR_LLM = Math.max(3, Number(process.env.FACTCHECK_EVIDENCE_MAX || 8));
 
 function evidenceDedupeKey(e) {
   return `${e.title}|${e.source}|${String(e.desc || "").slice(0, 80)}`;

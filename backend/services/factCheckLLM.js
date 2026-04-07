@@ -28,8 +28,42 @@ function skeletonResult(claims, evidence) {
  * @param {Array<{ title?: string, source?: string, desc?: string, forClaim?: string }>} evidence
  */
 async function evaluateClaims(claims, evidence) {
-  /** At most 3 evidence items (embedding-ranked) are sent to the model. */
-  const evidenceTop = (evidence || []).slice(0, 3);
+  /** Use a larger, claim-balanced evidence set so specific claims are less likely to be marked UNVERIFIED. */
+  const maxEvidence = Math.max(3, Number(process.env.FACTCHECK_EVIDENCE_MAX || 8));
+  const rawEvidence = Array.isArray(evidence) ? evidence : [];
+  const claimTexts = (claims || []).map((c) => (c?.claim ?? String(c || "")).trim());
+  const claimBuckets = new Map(claimTexts.map((c) => [c, []]));
+  const leftovers = [];
+  for (const e of rawEvidence) {
+    const key = String(e?.forClaim || "").trim();
+    if (key && claimBuckets.has(key)) {
+      claimBuckets.get(key).push(e);
+    } else {
+      leftovers.push(e);
+    }
+  }
+  const evidenceTop = [];
+  for (const c of claimTexts) {
+    const rows = claimBuckets.get(c) || [];
+    if (rows.length) evidenceTop.push(rows.shift());
+    if (evidenceTop.length >= maxEvidence) break;
+  }
+  if (evidenceTop.length < maxEvidence) {
+    for (const c of claimTexts) {
+      if (evidenceTop.length >= maxEvidence) break;
+      const rows = claimBuckets.get(c) || [];
+      for (const e of rows) {
+        evidenceTop.push(e);
+        if (evidenceTop.length >= maxEvidence) break;
+      }
+    }
+  }
+  if (evidenceTop.length < maxEvidence) {
+    for (const e of leftovers) {
+      evidenceTop.push(e);
+      if (evidenceTop.length >= maxEvidence) break;
+    }
+  }
 
   const client = getOpenAI();
   if (!client) return skeletonResult(claims, evidenceTop);
@@ -55,6 +89,7 @@ async function evaluateClaims(claims, evidence) {
           "You are a careful fact-checking assistant. Use ONLY the evidence snippets provided. " +
           'Return JSON with shape: {"claims":[{"claim":"...","verdict":"SUPPORTED|DISPUTED|UNVERIFIED","why":"..."}],' +
           '"confidence":0-100,"verdict":"VERIFIED|UNCERTAIN|REJECTED","summary":"short paragraph"}. ' +
+          "Evaluate each claim using evidence rows where forClaim matches that claim first. " +
           "If evidence is insufficient, use UNVERIFIED and lower confidence.",
       },
       {

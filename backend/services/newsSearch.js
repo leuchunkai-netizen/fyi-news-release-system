@@ -1,7 +1,14 @@
 const filters = require("../utils/filters");
 
-/** Default: BBC, CNA, Reuters (hostname suffixes / exact hosts). */
-const DEFAULT_EVIDENCE_DOMAINS = ["bbc.co.uk", "bbc.com", "channelnewsasia.com", "reuters.com"];
+/** Default trusted outlets; override with EVIDENCE_DOMAINS in env. */
+const DEFAULT_EVIDENCE_DOMAINS = [
+  "bbc.co.uk",
+  "bbc.com",
+  "channelnewsasia.com",
+  "reuters.com",
+  "apnews.com",
+  "ft.com",
+];
 
 function parseTrustedDomains() {
   const raw = process.env.EVIDENCE_DOMAINS || DEFAULT_EVIDENCE_DOMAINS.join(",");
@@ -110,6 +117,52 @@ function broadenQueryVariants(query) {
     if (words.length >= n) add(words.slice(0, n).join(" "));
   }
   return out;
+}
+
+function extractQuerySignals(text) {
+  const t = String(text || "");
+  const out = [];
+  const seen = new Set();
+  const add = (s) => {
+    const q = filters.sanitizeQuery(String(s || "").trim()).slice(0, 200).trim();
+    if (q.length < 3 || seen.has(q)) return;
+    seen.add(q);
+    out.push(q);
+  };
+
+  const entityMatches = t.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b/g) || [];
+  for (const e of entityMatches.slice(0, 4)) add(e);
+
+  const yearMatch = t.match(/\b(19|20)\d{2}\b/g) || [];
+  for (const y of yearMatch.slice(0, 2)) add(y);
+
+  const percentMatches = t.match(/\b\d+(?:\.\d+)?\s?%/g) || [];
+  for (const p of percentMatches.slice(0, 2)) add(p);
+
+  const locationMatches = t.match(/\b(?:in|at|from)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/g) || [];
+  for (const loc of locationMatches.slice(0, 3)) {
+    add(loc.replace(/^(in|at|from)\s+/i, ""));
+  }
+  return out;
+}
+
+function claimQueryVariants(claimText, q) {
+  const claim = String(claimText || "").trim();
+  const base = String(q || "").trim() || claim;
+  const out = [];
+  const seen = new Set();
+  const add = (s) => {
+    const v = filters.sanitizeQuery(String(s || "").trim()).slice(0, 200).trim();
+    if (v.length < 3 || seen.has(v)) return;
+    seen.add(v);
+    out.push(v);
+  };
+  add(base);
+  add(claim);
+  for (const v of broadenQueryVariants(base)) add(v);
+  for (const v of broadenQueryVariants(claim)) add(v);
+  for (const v of extractQuerySignals(claim)) add(v);
+  return out.slice(0, 8);
 }
 
 function mockEvidence(forClaim) {
@@ -282,22 +335,32 @@ async function fetchNewsDataForQuery(q, forClaim, options = {}) {
 async function searchForClaims(claims, options = {}) {
   const trustedDomainsOnly = options.trustedDomainsOnly !== false;
   const trustedDomains = options.trustedDomains || parseTrustedDomains();
+  const perClaimMax = Math.max(2, Number(process.env.NEWSDATA_PER_CLAIM_MAX || 4));
   const list = Array.isArray(claims) ? claims : [];
   const evidence = [];
-  const seen = new Set();
+  const seenGlobal = new Set();
   for (const c of list.slice(0, 5)) {
     const claimText = c.claim ?? String(c);
-    const q = c.q || claimText;
-    const batch = await fetchNewsDataForQuery(q, claimText, {
-      trustedDomainsOnly,
-      trustedDomains,
-    });
-    for (const e of batch) {
-      const key = `${e.title}|${e.source}|${e.forClaim}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      evidence.push(e);
+    const queries = claimQueryVariants(claimText, c.q || claimText);
+    const claimRows = [];
+    const seenClaim = new Set();
+
+    for (const q of queries) {
+      if (claimRows.length >= perClaimMax) break;
+      const batch = await fetchNewsDataForQuery(q, claimText, {
+        trustedDomainsOnly,
+        trustedDomains,
+      });
+      for (const e of batch) {
+        const key = `${e.title}|${e.source}|${String(e.desc || "").slice(0, 80)}`;
+        if (seenClaim.has(key) || seenGlobal.has(key)) continue;
+        seenClaim.add(key);
+        seenGlobal.add(key);
+        claimRows.push(e);
+        if (claimRows.length >= perClaimMax) break;
+      }
     }
+    evidence.push(...claimRows);
   }
   return evidence;
 }
