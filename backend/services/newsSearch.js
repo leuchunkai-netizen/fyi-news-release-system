@@ -134,10 +134,10 @@ function extractQuerySignals(text) {
   for (const e of entityMatches.slice(0, 4)) add(e);
 
   const yearMatch = t.match(/\b(19|20)\d{2}\b/g) || [];
-  for (const y of yearMatch.slice(0, 2)) add(y);
+  for (const y of yearMatch.slice(0, 2)) add(`news ${y}`);
 
   const percentMatches = t.match(/\b\d+(?:\.\d+)?\s?%/g) || [];
-  for (const p of percentMatches.slice(0, 2)) add(p);
+  for (const p of percentMatches.slice(0, 2)) add(`rate ${p}`);
 
   const locationMatches = t.match(/\b(?:in|at|from)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/g) || [];
   for (const loc of locationMatches.slice(0, 3)) {
@@ -146,9 +146,19 @@ function extractQuerySignals(text) {
   return out;
 }
 
+function detectClaimAnchor(text) {
+  const t = String(text || "").trim();
+  if (!t) return "";
+  const entities = t.match(/\b[A-Z][A-Za-z0-9-]{2,}(?:\s+[A-Z][A-Za-z0-9-]{2,}){0,2}\b/g) || [];
+  if (entities.length) return entities[0];
+  const words = t.split(/\s+/).filter(Boolean).sort((a, b) => b.length - a.length);
+  return words.find((w) => /^[A-Za-z][A-Za-z0-9-]{5,}$/.test(w)) || "";
+}
+
 function claimQueryVariants(claimText, q) {
   const claim = String(claimText || "").trim();
   const base = String(q || "").trim() || claim;
+  const anchor = detectClaimAnchor(claim) || detectClaimAnchor(base);
   const out = [];
   const seen = new Set();
   const add = (s) => {
@@ -162,7 +172,45 @@ function claimQueryVariants(claimText, q) {
   for (const v of broadenQueryVariants(base)) add(v);
   for (const v of broadenQueryVariants(claim)) add(v);
   for (const v of extractQuerySignals(claim)) add(v);
+  if (anchor) {
+    const anchored = [];
+    for (const v of out) {
+      if (v.toLowerCase().includes(anchor.toLowerCase())) {
+        anchored.push(v);
+        continue;
+      }
+      anchored.push(`${anchor} ${v}`.slice(0, 200));
+    }
+    return [...new Set(anchored)].slice(0, 8);
+  }
   return out.slice(0, 8);
+}
+
+function claimKeywords(claimText) {
+  const stop = new Set([
+    "the", "and", "that", "with", "from", "this", "were", "have", "has", "into", "about", "china", "chinese",
+    "open", "source", "data", "technology", "local", "governments", "government", "applications", "industry",
+  ]);
+  const words = String(claimText || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((w) => w.length >= 4 && !stop.has(w));
+  const entities = String(claimText || "").match(/\b[A-Z][A-Za-z0-9-]{2,}\b/g) || [];
+  return [...new Set([...entities.map((e) => e.toLowerCase()), ...words])].slice(0, 8);
+}
+
+function evidenceLooksRelevantToClaim(evidenceItem, claimText) {
+  const keys = claimKeywords(claimText);
+  if (!keys.length) return true;
+  const hay = `${evidenceItem.title || ""} ${evidenceItem.desc || ""}`.toLowerCase();
+  let hits = 0;
+  for (const k of keys) {
+    if (hay.includes(k)) hits += 1;
+    if (hits >= 2) return true;
+  }
+  return hits >= 1 && keys.some((k) => k.length >= 8);
 }
 
 function mockEvidence(forClaim) {
@@ -352,6 +400,7 @@ async function searchForClaims(claims, options = {}) {
         trustedDomains,
       });
       for (const e of batch) {
+        if (!evidenceLooksRelevantToClaim(e, claimText)) continue;
         const key = `${e.title}|${e.source}|${String(e.desc || "").slice(0, 80)}`;
         if (seenClaim.has(key) || seenGlobal.has(key)) continue;
         seenClaim.add(key);
