@@ -40,7 +40,7 @@ export async function getPublishedArticles(options?: {
   if (options?.q?.trim()) {
     const raw = options.q.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     const term = `"%${raw}%"`;
-    query = query.or(`title.ilike.${term},excerpt.ilike.${term}`);
+    query = query.or(`title.ilike.${term},excerpt.ilike.${term},content.ilike.${term}`);
   }
 
   const { data, error } = await query;

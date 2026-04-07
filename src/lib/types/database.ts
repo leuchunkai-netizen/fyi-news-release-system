@@ -11,6 +11,7 @@ export type TestimonialStatus = "pending" | "approved" | "rejected";
 export type ReportStatus = "pending" | "reviewed";
 export type ExpertApplicationStatus = "pending" | "approved" | "rejected";
 export type ExpertReviewDecision = "approved" | "rejected";
+export type ArticleAiSummarySource = "openai" | "huggingface" | "extract";
 
 export interface Database {
   public: {
@@ -91,6 +92,9 @@ export interface Database {
           views: number;
           created_at: string;
           updated_at: string;
+          ai_summary: string | null;
+          ai_summary_source: ArticleAiSummarySource | null;
+          ai_summary_content_hash: string | null;
         };
         Insert: {
           id?: string;
@@ -112,6 +116,9 @@ export interface Database {
           views?: number;
           created_at?: string;
           updated_at?: string;
+          ai_summary?: string | null;
+          ai_summary_source?: ArticleAiSummarySource | null;
+          ai_summary_content_hash?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["articles"]["Insert"]>;
       };

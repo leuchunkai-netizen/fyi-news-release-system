@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { getBookmarkedArticles, removeBookmark } from "../../lib/api/bookmarks";
 import { getCategories } from "../../lib/api/categories";
 import type { ArticleRow } from "../../lib/types/database";
+import { previewTextFromArticle } from "../../lib/articlePreview";
 import type { CategoryRow } from "../../lib/types/database";
 
 function formatTimeAgo(iso: string | null): string {
@@ -111,7 +112,7 @@ export function BookmarksPage() {
                   imageUrl={article.image_url ?? ""}
                   category={categoryMap.get(article.category_id ?? "") ?? "Uncategorized"}
                   title={article.title}
-                  excerpt={article.excerpt ?? ""}
+                  excerpt={previewTextFromArticle(article.excerpt, article.content)}
                   author={article.author_display_name ?? "Unknown"}
                   time={formatTimeAgo(article.published_at ?? article.created_at)}
                   views={article.views ?? 0}

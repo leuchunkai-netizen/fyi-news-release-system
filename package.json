@@ -4,10 +4,12 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -n web,api -c cyan,magenta \"npm run dev:web\" \"npm run dev:api\"",
+    "dev:web": "vite",
+    "dev:api": "node backend/server.js",
     "preview": "vite preview",
     "build": "vite build",
-    "start": "node server.cjs"
+    "start": "node backend/server.js"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -45,8 +47,10 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
+    "cors": "^2.8.6",
     "date-fns": "3.6.0",
     "embla-carousel-react": "8.6.0",
+    "express": "^4.21.2",
     "input-otp": "1.4.2",
     "lucide-react": "0.487.0",
     "motion": "12.23.24",
@@ -64,12 +68,12 @@
     "sonner": "2.0.3",
     "tailwind-merge": "3.2.0",
     "tw-animate-css": "1.3.8",
-    "vaul": "1.1.2",
-    "express": "^4.21.2"
+    "vaul": "1.1.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
     "@vitejs/plugin-react": "4.7.0",
+    "concurrently": "^9.1.2",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5"
   },

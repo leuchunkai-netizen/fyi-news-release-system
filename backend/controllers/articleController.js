@@ -1,0 +1,249 @@
+const { runFactcheckPipeline } = require("../services/articlePipeline");
+const { generateArticleSummary, summaryContentHash } = require("../services/articleSummary");
+const articleQueries = require("../db/articleQueries");
+const { upsertCredibilityFromFactcheck } = require("../db/credibilityQueries");
+const { getSupabaseAdmin } = require("../db/supabaseClient");
+const { getUserFromBearer } = require("../utils/supabaseAuth");
+
+async function listArticles(req, res) {
+  try {
+    const limit = Number(req.query.limit) || 20;
+    const result = await articleQueries.listPublishedArticles(limit);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || "Failed to list articles" });
+  }
+}
+
+/**
+ * POST /api/articles/factcheck
+ *
+ * Pipeline: length → garbage → (rate limit on route) → claim extraction →
+ * NewsData (BBC/CNA/Reuters by default) → optional pgvector → embeddings + rank → top 3 → OpenAI.
+ */
+async function factcheck(req, res) {
+  try {
+    const { title, body, articleId } = req.body || {};
+    const result = await runFactcheckPipeline({ title, body });
+    if (!result.ok) {
+      return res.status(result.status || 400).json({
+        error: result.error,
+        stage: result.stage,
+      });
+    }
+
+    let credibilitySaved = false;
+    let credibilitySaveError = null;
+    if (articleId && typeof articleId === "string") {
+      const save = await upsertCredibilityFromFactcheck(articleId, result);
+      credibilitySaved = save.ok;
+      credibilitySaveError = save.ok ? null : save.error;
+    }
+
+    res.json({
+      ...result.fc,
+      claimsList: result.claims,
+      top3: result.top3,
+      credibilitySaved,
+      credibilitySaveError,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Factcheck failed" });
+  }
+}
+
+/**
+ * POST /api/articles/summary — AI/HF summary from title + body (not user excerpt).
+ * With `articleId` + service role: load article from DB, return cached row if content hash matches, else generate once and persist.
+ */
+async function summarize(req, res) {
+  try {
+    const { articleId, title, content } = req.body || {};
+    const sb = getSupabaseAdmin();
+
+    if (articleId && typeof articleId === "string" && !sb) {
+      console.warn(
+        "[summary] SUPABASE_SERVICE_ROLE_KEY missing — cannot read/save article row. Put the key in backend/.env or project root .env and restart the API."
+      );
+      if (content == null || String(content).trim().length === 0) {
+        return res.status(503).json({
+          error:
+            "Server cannot save the summary without Supabase service role. Add SUPABASE_SERVICE_ROLE_KEY to backend/.env (same project) and restart the API.",
+          persisted: false,
+        });
+      }
+      const result = await generateArticleSummary({ title, content });
+      return res.json({
+        ...result,
+        cached: false,
+        persisted: false,
+        persistHint:
+          "Summary was generated but not stored: set SUPABASE_SERVICE_ROLE_KEY in backend/.env and restart the API.",
+      });
+    }
+
+    if (articleId && typeof articleId === "string" && sb) {
+      const { data: row, error: fetchErr } = await sb
+        .from("articles")
+        .select("id, title, content, ai_summary, ai_summary_source, ai_summary_content_hash")
+        .eq("id", articleId)
+        .maybeSingle();
+
+      if (fetchErr) return res.status(500).json({ error: fetchErr.message });
+      if (!row) return res.status(404).json({ error: "Article not found" });
+
+      const t = row.title ?? "";
+      const c = row.content ?? "";
+      if (!String(c).trim()) {
+        return res.status(400).json({ error: "Article has no content" });
+      }
+
+      const hash = summaryContentHash(t, c);
+      if (row.ai_summary && row.ai_summary_content_hash === hash) {
+        return res.json({
+          summary: row.ai_summary,
+          source: row.ai_summary_source || "extract",
+          cached: true,
+          persisted: true,
+        });
+      }
+
+      const result = await generateArticleSummary({ title: t, content: c });
+      const { data: updated, error: upErr } = await sb
+        .from("articles")
+        .update({
+          ai_summary: result.summary,
+          ai_summary_source: result.source,
+          ai_summary_content_hash: hash,
+        })
+        .eq("id", articleId)
+        .select("id")
+        .maybeSingle();
+
+      if (upErr) return res.status(500).json({ error: upErr.message });
+      if (!updated) {
+        return res.status(500).json({
+          error: "Summary was generated but the database update affected no rows (check article id and RLS/service role).",
+        });
+      }
+      return res.json({ ...result, cached: false, persisted: true });
+    }
+
+    if (content == null || String(content).trim().length === 0) {
+      return res.status(400).json({ error: "Missing content" });
+    }
+    const result = await generateArticleSummary({ title, content });
+    res.json({ ...result, cached: false, persisted: false });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Summary failed" });
+  }
+}
+
+/**
+ * POST /api/articles/submit-review
+ * After the client saves the article as pending, call this with the same title/body.
+ * Runs the fact-check pipeline; if verdict + confidence pass env thresholds, publishes automatically.
+ */
+async function submitForReview(req, res) {
+  try {
+    const user = await getUserFromBearer(req);
+    if (!user) {
+      return res.status(401).json({ error: "Sign in required, or configure SUPABASE_ANON_KEY on the API server." });
+    }
+
+    const { articleId, title, body } = req.body || {};
+    if (!articleId || typeof articleId !== "string") {
+      return res.status(400).json({ error: "Missing articleId" });
+    }
+    if (body == null || String(body).trim().length === 0) {
+      return res.status(400).json({ error: "Missing body" });
+    }
+
+    const sb = getSupabaseAdmin();
+    if (!sb) {
+      return res.status(503).json({ error: "Server cannot update articles (Supabase service role not configured)." });
+    }
+
+    const { data: article, error: fetchErr } = await sb
+      .from("articles")
+      .select("id, author_id, status")
+      .eq("id", articleId)
+      .maybeSingle();
+
+    if (fetchErr) return res.status(500).json({ error: fetchErr.message });
+    if (!article) return res.status(404).json({ error: "Article not found" });
+    if (article.author_id !== user.id) {
+      return res.status(403).json({ error: "You can only submit your own articles" });
+    }
+
+    const result = await runFactcheckPipeline({ title, body });
+    if (!result.ok) {
+      return res.status(400).json({
+        error: result.error,
+        stage: result.stage,
+      });
+    }
+
+    const saveCred = await upsertCredibilityFromFactcheck(articleId, result);
+    const credibilitySaveError = saveCred.ok ? null : saveCred.error;
+
+    const minConf = Number(process.env.AUTO_APPROVE_MIN_CONFIDENCE ?? 70);
+    const allowedVerdicts = (process.env.AUTO_APPROVE_VERDICTS || "VERIFIED,UNCERTAIN")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+
+    const verdict = String(result.fc.verdict || "UNCERTAIN").toUpperCase();
+    const confidence = Math.max(0, Math.min(100, Number(result.fc.confidence) || 0));
+
+    const verdictOk = allowedVerdicts.includes(verdict);
+    const confidenceOk = confidence >= minConf;
+    const autoApproved = verdictOk && confidenceOk && verdict !== "REJECTED";
+
+    const score = Math.round(confidence);
+
+    if (autoApproved) {
+      const { error: upErr } = await sb
+        .from("articles")
+        .update({
+          status: "published",
+          published_at: new Date().toISOString(),
+          credibility_score: score,
+          rejection_reason: null,
+          submitted_at: new Date().toISOString(),
+        })
+        .eq("id", articleId);
+      if (upErr) return res.status(500).json({ error: upErr.message });
+    } else {
+      const { error: upErr } = await sb
+        .from("articles")
+        .update({
+          status: "pending",
+          credibility_score: score,
+          rejection_reason: null,
+          submitted_at: new Date().toISOString(),
+        })
+        .eq("id", articleId);
+      if (upErr) return res.status(500).json({ error: upErr.message });
+    }
+
+    res.json({
+      autoApproved,
+      verdict,
+      confidence,
+      minConfidence: minConf,
+      allowedVerdicts,
+      credibilitySaved: saveCred.ok,
+      credibilitySaveError,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "Submit review failed" });
+  }
+}
+
+module.exports = {
+  listArticles,
+  factcheck,
+  summarize,
+  submitForReview,
+};

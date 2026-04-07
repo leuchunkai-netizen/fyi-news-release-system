@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Search } from "lucide-react";
 import { ArticleCard } from "../components/ArticleCard";
 import { getCategories, getPublishedArticles } from "@/lib/api";
+import { previewTextFromArticle } from "@/lib/articlePreview";
 import type { ArticleWithCategory } from "@/lib/api/articles";
 import type { CategoryRow } from "@/lib/types/database";
 const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1622223145461-271074da3e20?w=1080";
@@ -28,7 +29,7 @@ function mapArticleToCard(a: ArticleWithCategory) {
     imageUrl: a.image_url || DEFAULT_IMAGE,
     category: (a.category as { name?: string } | null)?.name ?? "Uncategorized",
     title: a.title,
-    excerpt: a.excerpt ?? "",
+    excerpt: previewTextFromArticle(a.excerpt, a.content),
     author: a.author_display_name ?? "Staff",
     time: formatTimeAgoPrecise(a.published_at ?? a.created_at),
     views: a.views ?? 0,

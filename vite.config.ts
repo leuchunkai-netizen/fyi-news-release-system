@@ -19,4 +19,14 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  // Dev-only: let the frontend call the Express API without CORS.
+  server: {
+    proxy: {
+      "/api": {
+        target: "http://localhost:10000",
+        changeOrigin: true,
+      },
+    },
+  },
 })

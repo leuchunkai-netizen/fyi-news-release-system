@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router";
-import { AlertTriangle, Upload, X } from "lucide-react";
+import { AlertTriangle, ClipboardCheck, Upload, X } from "lucide-react";
 import { useUser } from "../context/UserContext";
+import { factcheckArticle, type FactcheckResult } from "../../lib/api/factcheck";
+import { evaluateSubmitForReview } from "../../lib/api/submitReview";
 import { createArticle, getArticleById, updateArticle } from "../../lib/api/articles";
 import { getCategories } from "../../lib/api/categories";
 import { uploadArticleImage } from "../../lib/storage";
@@ -51,7 +53,6 @@ export function UploadArticlePage() {
     title: "",
     category: "",
     content: "",
-    excerpt: "",
   });
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -62,6 +63,9 @@ export function UploadArticlePage() {
   const [isRejectedEdit, setIsRejectedEdit] = useState(false);
   const [rejectionReason, setRejectionReason] = useState<string>("");
   const [rejectionFindings, setRejectionFindings] = useState<RejectionFinding[]>([]);
+  const [factcheckLoading, setFactcheckLoading] = useState(false);
+  const [factcheckError, setFactcheckError] = useState<string | null>(null);
+  const [factcheckResult, setFactcheckResult] = useState<FactcheckResult | null>(null);
 
   useEffect(() => {
     getCategories().then(setCategories).catch(() => setCategories([]));
@@ -88,7 +92,6 @@ export function UploadArticlePage() {
           title: article.title ?? "",
           category: article.category?.slug ?? "",
           content: article.content ?? "",
-          excerpt: article.excerpt ?? "",
         });
         if (article.status === "rejected") {
           const reason = article.rejection_reason?.trim() || "The article did not meet credibility requirements.";
@@ -130,6 +133,31 @@ export function UploadArticlePage() {
     );
   }
 
+  const handleRunFactcheck = async () => {
+    setFactcheckError(null);
+    const title = formData.title.trim();
+    const body = stripHtml(formData.content);
+    const combined = [title, body].filter(Boolean).join("\n\n").trim();
+    if (combined.length < 80) {
+      setFactcheckError("Add a title and article text (at least 80 characters total) before running a fact check.");
+      return;
+    }
+    setFactcheckLoading(true);
+    setFactcheckResult(null);
+    try {
+      const result = await factcheckArticle({
+        title: title || undefined,
+        body,
+        ...(isEditing && editingArticleId ? { articleId: editingArticleId } : {}),
+      });
+      setFactcheckResult(result);
+    } catch (err) {
+      setFactcheckError(err instanceof Error ? err.message : "Fact check failed.");
+    } finally {
+      setFactcheckLoading(false);
+    }
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -169,12 +197,6 @@ export function UploadArticlePage() {
         return;
       }
 
-      if (!isDraft && !formData.excerpt.trim()) {
-        setError("Please add an excerpt before submitting for review.");
-        setSubmitting(false);
-        return;
-      }
-
       if (!isDraft && !formData.content.trim()) {
         setError("Please add article content before submitting for review.");
         setSubmitting(false);
@@ -197,10 +219,12 @@ export function UploadArticlePage() {
         }
       }
 
+      let resolvedArticleId = "";
+
       if (isEditing && editingArticleId) {
         await updateArticle(editingArticleId, {
           title,
-          excerpt: formData.excerpt.trim() || null,
+          excerpt: null,
           content: formData.content.trim() || null,
           image_url,
           category_id,
@@ -208,19 +232,47 @@ export function UploadArticlePage() {
           submitted_at: isDraft ? null : new Date().toISOString(),
           rejection_reason: null,
         });
+        resolvedArticleId = editingArticleId;
       } else {
-        await createArticle({
+        const created = await createArticle({
           author_id: user.id,
           title,
-          excerpt: formData.excerpt.trim() || null,
+          excerpt: null,
           content: formData.content.trim() || null,
           image_url,
           author_display_name: user.name,
           category_id,
           status: isDraft ? "draft" : "pending",
         });
+        resolvedArticleId = created.id;
       }
-      navigate("/my-articles");
+
+      if (!isDraft && resolvedArticleId) {
+        try {
+          const outcome = await evaluateSubmitForReview({
+            articleId: resolvedArticleId,
+            title: title || undefined,
+            body: formData.content.trim() || "",
+          });
+          navigate("/my-articles", {
+            state: {
+              submitNotice: outcome.autoApproved
+                ? "auto-published"
+                : "pending-review",
+            },
+          });
+        } catch (reviewErr) {
+          console.error(reviewErr);
+          navigate("/my-articles", {
+            state: {
+              submitNotice: "review-failed",
+              submitError: reviewErr instanceof Error ? reviewErr.message : "Review step failed",
+            },
+          });
+        }
+      } else {
+        navigate("/my-articles");
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to submit article.";
       setError(message);
@@ -235,8 +287,8 @@ export function UploadArticlePage() {
         <h1 className="text-3xl font-semibold mb-2">{isEditing ? "Edit Article" : "Upload New Article"}</h1>
         <p className="text-muted-foreground mb-8">
           {isEditing
-            ? "Continue refining your article. Save draft changes anytime or submit for expert review when ready."
-            : "Share your story with our community. Save a draft anytime, or submit for expert review when ready."}
+            ? "Continue refining your article. Save draft changes anytime, or submit for review — we may publish automatically if the fact-check clears your thresholds."
+            : "Share your story with our community. Save a draft anytime, or submit for review — we may publish automatically if the fact-check clears your thresholds."}
         </p>
 
         {error && (
@@ -309,21 +361,6 @@ export function UploadArticlePage() {
             </select>
           </div>
 
-          {/* Excerpt */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Excerpt</label>
-            <textarea
-              value={formData.excerpt}
-              onChange={(e) => setFormData({ ...formData, excerpt: e.target.value })}
-              className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
-              rows={3}
-              placeholder="Write a brief summary (2-3 sentences)"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              {formData.excerpt.length} / 300 characters
-            </p>
-          </div>
-
           {/* Featured Image */}
           <div>
             <label className="block text-sm font-medium mb-2">Featured Image</label>
@@ -372,6 +409,92 @@ export function UploadArticlePage() {
             </p>
           </div>
 
+          {/* Fact check (calls backend POST /api/articles/factcheck — run Vite dev so /api proxies to port 10000) */}
+          <div className="border rounded-lg p-4 bg-slate-50 border-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="font-semibold flex items-center gap-2">
+                  <ClipboardCheck className="w-5 h-5 text-slate-700" />
+                  Fact check draft
+                </h3>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Uses your title and article text. Does not submit the article.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRunFactcheck}
+                disabled={factcheckLoading}
+                className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 disabled:opacity-50 text-sm shrink-0"
+              >
+                {factcheckLoading ? "Checking…" : "Run fact check"}
+              </button>
+            </div>
+            {factcheckError && (
+              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2 mb-3">{factcheckError}</div>
+            )}
+            {factcheckResult && (
+              <div className="space-y-3 text-sm">
+                <p>
+                  <span className="font-semibold">Overall:</span>{" "}
+                  <span className="uppercase tracking-wide">{factcheckResult.verdict}</span>
+                  {" · "}
+                  <span className="text-muted-foreground">Confidence {factcheckResult.confidence}%</span>
+                </p>
+                <p className="text-muted-foreground">{factcheckResult.summary}</p>
+                {Array.isArray(factcheckResult.claims) && factcheckResult.claims.length > 0 && (
+                  <ul className="list-disc pl-5 space-y-2">
+                    {factcheckResult.claims.map((c, i) => (
+                      <li key={i}>
+                        <span className="font-medium">{c.verdict}</span>: {c.claim}
+                        {c.why ? <span className="block text-muted-foreground mt-0.5">{c.why}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {Array.isArray(factcheckResult.top3) && factcheckResult.top3.length > 0 && (
+                  <div>
+                    <p className="font-semibold mb-1">Evidence snippets used</p>
+                    <ul className="space-y-2 border-t border-slate-200 pt-2">
+                      {factcheckResult.top3.map((raw, i) => {
+                        const e = raw ?? {};
+                        const title = String(e.title ?? "");
+                        const source = String(e.source ?? "");
+                        const desc =
+                          e.desc != null && typeof e.desc === "string"
+                            ? e.desc
+                            : e.desc != null
+                              ? String(e.desc)
+                              : "";
+                        return (
+                          <li key={i} className="text-xs text-muted-foreground">
+                            <span className="text-slate-800 font-medium">{title}</span> ({source})
+                            {desc ? (
+                              <span className="block mt-0.5">
+                                {desc.slice(0, 280)}
+                                {desc.length > 280 ? "…" : ""}
+                              </span>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+                {isEditing && editingArticleId && factcheckResult.credibilitySaved === true && (
+                  <p className="text-xs text-green-800 bg-green-50 border border-green-200 rounded px-2 py-1.5">
+                    Credibility breakdown saved to the database for this article. It will appear on the article page for readers after you publish.
+                  </p>
+                )}
+                {isEditing && editingArticleId && factcheckResult.credibilitySaveError && (
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                    Could not save credibility data: {factcheckResult.credibilitySaveError}. Check backend Supabase service role in .env.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Guidelines */}
           <div className="border rounded-lg p-4 bg-blue-50">
             <h3 className="font-semibold mb-2">Publishing Guidelines</h3>
@@ -380,6 +503,7 @@ export function UploadArticlePage() {
               <li>• Ensure your content is factually accurate and well-researched</li>
               <li>• Include credible sources when making claims</li>
               <li>• Follow journalistic ethics and avoid plagiarism</li>
+              <li>• List previews use a short clip from your article body; premium readers can open AI summary on the article page</li>
               <li>• Review process typically takes 24-48 hours</li>
             </ul>
           </div>

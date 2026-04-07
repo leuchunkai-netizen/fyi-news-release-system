@@ -6,6 +6,7 @@ import { useUser } from "../context/UserContext";
 import { useGuestLanding } from "../context/GuestLandingContext";
 import { useTestimonials } from "../context/TestimonialsContext";
 import { getCategories, getPublishedArticles, getTrendingArticles } from "@/lib/api";
+import { previewTextFromArticle } from "@/lib/articlePreview";
 import type { ArticleWithCategory, TrendingArticleItem } from "@/lib/api/articles";
 import type { CategoryRow } from "@/lib/types/database";
 import { Link, useParams } from "react-router";
@@ -39,7 +40,7 @@ function mapArticleToCard(a: ArticleWithCategory) {
     imageUrl: a.image_url || DEFAULT_IMAGE,
     category: (a.category as { name?: string } | null)?.name ?? "Uncategorized",
     title: a.title,
-    excerpt: a.excerpt ?? "",
+    excerpt: previewTextFromArticle(a.excerpt, a.content),
     author: a.author_display_name ?? "Staff",
     time: formatTimeAgoPrecise(a.published_at ?? a.created_at),
     views: a.views ?? 0,

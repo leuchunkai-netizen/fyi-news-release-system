@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { Edit, Trash2, Eye, Clock, CheckCircle, XCircle } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { getMyArticles, deleteArticle } from "../../lib/api/articles";
@@ -10,8 +10,15 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+type MyArticlesLocationState = {
+  submitNotice?: "auto-published" | "pending-review" | "review-failed";
+  submitError?: string;
+};
+
 export function MyArticlesPage() {
   const { user } = useUser();
+  const location = useLocation();
+  const navState = location.state as MyArticlesLocationState | null;
   const [filter, setFilter] = useState<"all" | "draft" | "published" | "pending" | "rejected">("all");
   const [articles, setArticles] = useState<ArticleWithCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +30,7 @@ export function MyArticlesPage() {
       .then(setArticles)
       .catch(() => setArticles([]))
       .finally(() => setLoading(false));
-  }, [user?.id, user?.role]);
+  }, [user?.id, user?.role, location.key]);
 
   if (!user || (user.role !== "free" && user.role !== "premium")) {
     return (
@@ -109,6 +116,23 @@ export function MyArticlesPage() {
             Upload New Article
           </Link>
         </div>
+
+        {navState?.submitNotice === "auto-published" && (
+          <div className="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+            Your article passed the fact-check and was published automatically.
+          </div>
+        )}
+        {navState?.submitNotice === "pending-review" && (
+          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Your article is queued for review. It did not meet the automatic publish bar, or needs a human check.
+          </div>
+        )}
+        {navState?.submitNotice === "review-failed" && (
+          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            The automatic review step failed. Your article is still saved as pending.
+            {navState.submitError ? ` ${navState.submitError}` : ""}
+          </div>
+        )}
 
         <div className="flex gap-2 mb-6 border-b">
           <button

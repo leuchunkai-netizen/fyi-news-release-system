@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router";
 import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info, Eye, Trash2 } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { getArticleById, incrementArticleViews, getCredibilityAnalysis } from "../../lib/api/articles";
+import { fetchArticleSummary, type ArticleSummaryResult } from "../../lib/api/summary";
 import { getComments, addComment, deleteComment, reportComment } from "../../lib/api/comments";
 import { addBookmark, removeBookmark, isBookmarked } from "../../lib/api/bookmarks";
 import type { ArticleWithCategory } from "../../lib/api/articles";
@@ -31,6 +32,20 @@ interface RejectionFinding {
 
 function stripHtml(input: string): string {
   return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function asStringArray(v: unknown): string[] {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.filter((x): x is string => typeof x === "string");
+  if (typeof v === "string") {
+    try {
+      const p = JSON.parse(v) as unknown;
+      return Array.isArray(p) ? p.filter((x): x is string => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 }
 
 function buildSampleRejectionFindings(content: string, concerns: string[], warnings: string[]): RejectionFinding[] {
@@ -65,6 +80,9 @@ export function ArticleDetailPage() {
   const [comments, setComments] = useState<CommentWithAuthor[]>([]);
   const [comment, setComment] = useState("");
   const [showAISummary, setShowAISummary] = useState(false);
+  const [aiSummary, setAiSummary] = useState<ArticleSummaryResult | null>(null);
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
+  const [aiSummaryError, setAiSummaryError] = useState<string | null>(null);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [showFlagConfirm, setShowFlagConfirm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -141,6 +159,38 @@ export function ArticleDetailPage() {
     })();
     return () => { cancelled = true; };
   }, [id, user?.id]);
+
+  useEffect(() => {
+    setShowAISummary(false);
+    setAiSummary(null);
+    setAiSummaryError(null);
+    setAiSummaryLoading(false);
+  }, [id]);
+
+  useEffect(() => {
+    if (!showAISummary || !article?.content?.trim()) return;
+    if (aiSummary) return;
+    let cancelled = false;
+    setAiSummaryLoading(true);
+    setAiSummaryError(null);
+    fetchArticleSummary({
+      articleId: article.id,
+      title: article.title ?? undefined,
+      content: article.content ?? "",
+    })
+      .then((r) => {
+        if (!cancelled) setAiSummary(r);
+      })
+      .catch((e) => {
+        if (!cancelled) setAiSummaryError(e instanceof Error ? e.message : "Could not load summary.");
+      })
+      .finally(() => {
+        if (!cancelled) setAiSummaryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAISummary, article?.id, article?.content, article?.title, aiSummary]);
 
   useEffect(() => {
     if (user || !article || article.status !== "published") {
@@ -318,7 +368,8 @@ export function ArticleDetailPage() {
   const categorySlug = (article as ArticleWithCategory).category?.slug ?? "all";
   const expertScore = article.credibility_score ?? null;
   const aiScore = credibilityAnalysis?.score ?? null;
-  const primaryScore = (expertScore ?? aiScore ?? 0) as number;
+  const primaryScore =
+    expertScore != null ? expertScore : aiScore != null ? aiScore : null;
 
   const getCredibilityLevel = (score: number) => {
     if (score >= 80) return { level: "High", color: "green", bgColor: "bg-green-50", textColor: "text-green-800", borderColor: "border-green-200" };
@@ -326,44 +377,23 @@ export function ArticleDetailPage() {
     return { level: "Low", color: "red", bgColor: "bg-red-50", textColor: "text-red-800", borderColor: "border-red-200" };
   };
 
-  const credibilityInfo = getCredibilityLevel(primaryScore);
-  const showWarning = primaryScore < 60;
+  const credibilityInfo = primaryScore != null ? getCredibilityLevel(primaryScore) : null;
+  const showWarning = primaryScore != null && primaryScore < 60;
+  const hasDbAnalysis = credibilityAnalysis != null;
 
-  const factors = credibilityAnalysis
+  const factors = hasDbAnalysis
     ? {
         sourceQuality: credibilityAnalysis.source_quality ?? 0,
         factualAccuracy: credibilityAnalysis.factual_accuracy ?? 0,
-        expertReview: credibilityAnalysis.expert_review_score ?? 0,
+        expertReview: credibilityAnalysis.expert_review_score,
         citations: credibilityAnalysis.citations_score ?? 0,
-        authorCredibility: credibilityAnalysis.author_credibility_score ?? 0,
+        authorCredibility: credibilityAnalysis.author_credibility_score,
       }
-    : {
-        // Default demo values so every article shows a full panel,
-        // even when AI data has not been generated yet.
-        sourceQuality: 92,
-        factualAccuracy: 88,
-        expertReview: 95,
-        citations: 85,
-        authorCredibility: 90,
-      };
+    : null;
 
-  const strengths =
-    ((credibilityAnalysis?.strengths as string[] | undefined) ?? []).length > 0
-      ? (credibilityAnalysis?.strengths as string[])
-      : [
-          "Multiple expert sources",
-          "Clinical trial data referenced",
-          "Expert verification completed",
-        ];
-
-  const concerns =
-    ((credibilityAnalysis?.concerns as string[] | undefined) ?? []).length > 0
-      ? (credibilityAnalysis?.concerns as string[])
-      : [
-          "Some claims about 99% accuracy rate need additional peer-reviewed validation",
-        ];
-
-  const warnings = (credibilityAnalysis?.warnings as string[] | undefined) ?? [];
+  const strengths = hasDbAnalysis ? asStringArray(credibilityAnalysis.strengths) : [];
+  const concerns = hasDbAnalysis ? asStringArray(credibilityAnalysis.concerns) : [];
+  const warnings = hasDbAnalysis ? asStringArray(credibilityAnalysis.warnings) : [];
   const rejectionReasonSummary =
     article.status === "rejected"
       ? article.rejection_reason?.trim() ||
@@ -377,7 +407,7 @@ export function ArticleDetailPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-4xl mx-auto">
-        {showWarning && (
+        {showWarning && primaryScore != null && (
           <div className="mb-6 border-2 border-red-300 rounded-lg p-4 bg-red-50">
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-1" />
@@ -406,19 +436,23 @@ export function ArticleDetailPage() {
 
           <h1 className="text-4xl font-serif mb-4">{article.title}</h1>
 
-          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border ${credibilityInfo.borderColor} ${credibilityInfo.bgColor} mb-4`}>
-            <Info className={`w-5 h-5 text-${credibilityInfo.color}-600`} />
-            <div>
-              <p className={`text-sm font-semibold ${credibilityInfo.textColor}`}>
-                Credibility Score: {primaryScore}% – {credibilityInfo.level}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {expertScore !== null
-                  ? "Expert score, enriched with AI factors from the analysis below."
-                  : "AI estimate based on sources, citations, and author credibility."}
-              </p>
+          {credibilityInfo && primaryScore != null && (
+            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border ${credibilityInfo.borderColor} ${credibilityInfo.bgColor} mb-4`}>
+              <Info className={`w-5 h-5 text-${credibilityInfo.color}-600`} />
+              <div>
+                <p className={`text-sm font-semibold ${credibilityInfo.textColor}`}>
+                  Credibility Score: {primaryScore}% – {credibilityInfo.level}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {expertScore != null
+                    ? "Score from expert review."
+                    : hasDbAnalysis
+                      ? "Automated fact-check (editor): claims, news evidence, and LLM assessment saved to this article."
+                      : ""}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
@@ -557,7 +591,28 @@ export function ArticleDetailPage() {
               </button>
             </div>
             {showAISummary && (
-              <p className="text-sm">{article.excerpt || "No summary available."}</p>
+              <div className="text-sm space-y-2">
+                {aiSummaryLoading && (
+                  <p className="text-muted-foreground">Generating summary…</p>
+                )}
+                {aiSummaryError && <p className="text-red-700">{aiSummaryError}</p>}
+                {!aiSummaryLoading && aiSummary && (
+                  <>
+                    <p className="text-foreground leading-relaxed">{aiSummary.summary}</p>
+                    {aiSummary.persisted === false && aiSummary.persistHint && (
+                      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                        {aiSummary.persistHint}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {aiSummary.cached && "Saved summary (shared for all readers; no new AI call). "}
+                      {aiSummary.source === "openai" && "Generated with AI"}
+                      {aiSummary.source === "huggingface" && "Generated with Hugging Face"}
+                      {aiSummary.source === "extract" && "Auto preview (no AI keys configured or API unavailable)"}
+                    </p>
+                  </>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -628,6 +683,12 @@ export function ArticleDetailPage() {
           </div>
         )}
 
+        {expertScore != null && !hasDbAnalysis && (
+          <p className="text-sm text-muted-foreground mb-4">
+            Run <span className="font-medium">Fact check draft</span> while editing this article to save automated credibility factors to the database.
+          </p>
+        )}
+
         {factors && (
           <div className="mb-6 border rounded-lg overflow-hidden">
             <div className="bg-gray-50 border-b px-6 py-4">
@@ -636,19 +697,23 @@ export function ArticleDetailPage() {
                 AI Credibility Analysis
               </h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Our system analyzes article credibility based on multiple factors. Threshold: &lt;60% = Warning, 60–79% = Moderate, ≥80% = High.
+                Derived from the fact-check pipeline (news evidence + claim checks). Threshold: &lt;60% = Warning, 60–79% = Moderate, ≥80% = High.
               </p>
             </div>
             <div className="p-6 space-y-4">
               <div className="space-y-3">
                 <h4 className="font-semibold text-sm">Credibility Factors:</h4>
-                {[
-                  ["Source Quality", factors.sourceQuality],
-                  ["Factual Accuracy", factors.factualAccuracy],
-                  ["Expert Review", factors.expertReview],
-                  ["Citations", factors.citations],
-                  ["Author Credibility", factors.authorCredibility],
-                ].map(([label, value]) => (
+                {(
+                  [
+                    ["Source Quality", factors.sourceQuality],
+                    ["Factual Accuracy", factors.factualAccuracy],
+                    ["Expert Review", factors.expertReview],
+                    ["Citations", factors.citations],
+                    ["Author Credibility", factors.authorCredibility],
+                  ] as const
+                )
+                  .filter((entry): entry is [string, number] => typeof entry[1] === "number")
+                  .map(([label, value]) => (
                   <div key={label}>
                     <div className="flex justify-between text-sm mb-1">
                       <span>{label}</span>
@@ -695,9 +760,8 @@ export function ArticleDetailPage() {
               )}
               <div className="pt-4 mt-2 border-t text-xs text-muted-foreground">
                 <span className="font-semibold">How it works:</span>{" "}
-                Our AI analyzes source quality (peer-reviewed journals, expert quotes), factual accuracy
-                (cross-referenced claims), expert verification status, citation quality, and author credibility.
-                Articles scoring below 60% receive automatic warnings to help readers make informed decisions.
+                Scores are produced when an author runs <span className="font-medium">Fact check draft</span> in the editor:
+                claims are checked against retrieved news evidence and an LLM assessment; results are stored here for readers.
               </div>
             </div>
           </div>
