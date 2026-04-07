@@ -499,12 +499,12 @@ export function UploadArticlePage() {
           <div className="border rounded-lg p-4 bg-blue-50">
             <h3 className="font-semibold mb-2">Publishing Guidelines</h3>
             <ul className="text-sm space-y-1 text-muted-foreground">
-              <li>• All articles are reviewed by expert verifiers before publication</li>
-              <li>• Ensure your content is factually accurate and well-researched</li>
-              <li>• Include credible sources when making claims</li>
-              <li>• Follow journalistic ethics and avoid plagiarism</li>
-              <li>• List previews use a short clip from your article body; premium readers can open AI summary on the article page</li>
-              <li>• Review process typically takes 24-48 hours</li>
+              <li>• You can save as draft anytime; drafts are private until you submit for review.</li>
+              <li>• Run Fact check draft before submitting to catch unsupported or disputed claims early.</li>
+              <li>• Submit for Review runs server-side fact-check + confidence scoring automatically.</li>
+              <li>• If confidence/verdict passes your configured thresholds, the article auto-publishes; otherwise it stays pending for manual review.</li>
+              <li>• If rejected, update the flagged sections and resubmit from this editor.</li>
+              <li>• Published articles show credibility analysis; list previews come from article body and premium readers can open AI summary on article detail pages.</li>
             </ul>
           </div>
 
