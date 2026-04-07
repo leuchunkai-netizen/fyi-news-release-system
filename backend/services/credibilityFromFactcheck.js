@@ -1,6 +1,12 @@
 /**
  * Map fact-check pipeline output → article_credibility_analysis row (Supabase).
  */
+function isMockEvidenceItem(e) {
+  if (!e) return true;
+  const s = String(e.source || "").toLowerCase();
+  if (s === "example.com" || s === "example.org") return true;
+  return String(e.desc || "").includes("Placeholder");
+}
 
 /**
  * @param {*} fc fact-check LLM result
@@ -18,8 +24,11 @@ function mapPipelineToCredibilityRow(fc, _claimsList, top3) {
   const factualAccuracy = Math.round((supported / total) * 100);
 
   const evidence = Array.isArray(top3) ? top3 : [];
+  const mockCount = evidence.filter(isMockEvidenceItem).length;
   const sourceQuality =
-    evidence.length === 0 ? Math.max(30, confidence - 20) : Math.round(70 + Math.min(30, confidence / 3));
+    evidence.length === 0
+      ? Math.max(30, confidence - 20)
+      : Math.round(100 - (mockCount / evidence.length) * 45);
 
   const citationsScore = Math.min(100, evidence.length * 34);
 
@@ -60,4 +69,4 @@ function mapPipelineToCredibilityRow(fc, _claimsList, top3) {
   };
 }
 
-module.exports = { mapPipelineToCredibilityRow };
+module.exports = { mapPipelineToCredibilityRow, isMockEvidenceItem };

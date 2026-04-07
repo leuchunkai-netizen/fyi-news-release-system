@@ -10,21 +10,6 @@ const DEFAULT_EVIDENCE_DOMAINS = [
   "ft.com",
 ];
 
-const NEWS_REQUEST_TIMEOUT_MS = Math.max(
-  1500,
-  Number(process.env.NEWS_REQUEST_TIMEOUT_MS || 4500),
-);
-
-async function fetchWithTimeout(url, opts = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), NEWS_REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...opts, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function parseTrustedDomains() {
   const raw = process.env.EVIDENCE_DOMAINS || DEFAULT_EVIDENCE_DOMAINS.join(",");
   return raw
@@ -228,6 +213,24 @@ function evidenceLooksRelevantToClaim(evidenceItem, claimText) {
   return hits >= 1 && keys.some((k) => k.length >= 8);
 }
 
+function mockEvidence(forClaim) {
+  return [
+    {
+      title: "Mock evidence source #1",
+      source: "example.com",
+      desc:
+        "Placeholder — no NEWSDATA_API_KEY, or NewsData returned no rows (empty query, API error, or no matches in the last 48 hours). Check server logs for [newsSearch].",
+      forClaim,
+    },
+    {
+      title: "Mock evidence source #2",
+      source: "example.org",
+      desc: "Second placeholder evidence item.",
+      forClaim,
+    },
+  ];
+}
+
 function stripXmlTags(input) {
   return String(input || "")
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
@@ -242,7 +245,8 @@ function stripXmlTags(input) {
 }
 
 /**
- * No-key fallback when NewsData is unavailable (Google News RSS).
+ * No-key fallback when NewsData is unavailable.
+ * Uses Google News RSS search to avoid returning placeholders only.
  */
 async function fetchGoogleNewsRssForQuery(q, forClaim) {
   const query = buildNewsDataQuery(q, forClaim);
@@ -253,7 +257,7 @@ async function fetchGoogleNewsRssForQuery(q, forClaim) {
   url.searchParams.set("ceid", "US:en");
 
   try {
-    const res = await fetchWithTimeout(url.toString());
+    const res = await fetch(url.toString());
     const xml = await res.text();
     if (!res.ok || !xml) return [];
 
@@ -289,11 +293,12 @@ async function fetchNewsDataForQuery(q, forClaim, options = {}) {
   const query = buildNewsDataQuery(q, forClaim);
   if (!apiKey) {
     const rssEvidence = await fetchGoogleNewsRssForQuery(query, forClaim);
-    return rssEvidence;
+    if (rssEvidence.length) return rssEvidence;
+    return mockEvidence(forClaim);
   }
 
   const poolTarget = Math.min(Number(process.env.NEWSDATA_EVIDENCE_POOL) || 24, 80);
-  const maxPages = Number(process.env.NEWSDATA_MAX_PAGES) || 2;
+  const maxPages = Number(process.env.NEWSDATA_MAX_PAGES) || 4;
   /** Free NewsData plans allow size 1–10; paid allows higher (see NewsData docs). */
   const pageSize = Math.min(Math.max(Number(process.env.NEWSDATA_PAGE_SIZE) || 10, 1), 50);
 
@@ -314,7 +319,7 @@ async function fetchNewsDataForQuery(q, forClaim, options = {}) {
       url.searchParams.set("language", "en");
     }
     url.searchParams.set("size", String(Math.min(pageSize, 10)));
-    const res = await fetchWithTimeout(url.toString());
+    const res = await fetch(url.toString());
     const data = await res.json().catch(() => null);
     if (!res.ok || !data || data.status !== "success") {
       const msg = data?.results?.message || data?.message;
@@ -342,7 +347,7 @@ async function fetchNewsDataForQuery(q, forClaim, options = {}) {
       url.searchParams.set("page", nextPage);
     }
 
-    const res = await fetchWithTimeout(url.toString());
+    const res = await fetch(url.toString());
     const data = await res.json().catch(() => null);
     if (!res.ok || !data || data.status !== "success") {
       if (apiKey && data && typeof data === "object") {
@@ -380,7 +385,7 @@ async function fetchNewsDataForQuery(q, forClaim, options = {}) {
         url.searchParams.set("language", "en");
       }
       url.searchParams.set("size", String(Math.min(pageSize, 10)));
-      const res = await fetchWithTimeout(url.toString());
+      const res = await fetch(url.toString());
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || data.status !== "success") continue;
       const pageResults = Array.isArray(data.results) ? data.results : [];
@@ -409,22 +414,20 @@ async function fetchNewsDataForQuery(q, forClaim, options = {}) {
   }
 
   /**
-   * NewsData returned articles, but none matched EVIDENCE_DOMAINS.
-   * Optionally use other NewsData rows; else try RSS; never return fabricated evidence.
+   * NewsData returned articles, but none matched EVIDENCE_DOMAINS (e.g. K-pop stories rarely
+   * appear on BBC/Reuters). Prefer real NewsData rows over mock placeholders unless explicitly strict.
    */
   const allowUnfiltered =
     process.env.EVIDENCE_ALLOW_UNFILTERED_FALLBACK !== "false";
   if (trustedDomainsOnly && allowUnfiltered && collected.length > 0) {
     console.warn(
       "[newsSearch] No articles from trusted domains for this query; using other NewsData.io results. " +
-        "Narrow topics: add outlets to EVIDENCE_DOMAINS or set EVIDENCE_ALLOW_UNFILTERED_FALLBACK=false for stricter filtering.",
+        "Narrow topics: add outlets to EVIDENCE_DOMAINS or set EVIDENCE_ALLOW_UNFILTERED_FALLBACK=false to use placeholders only.",
     );
     return collected.slice(0, Math.min(poolTarget, collected.length));
   }
 
-  const rssLast = await fetchGoogleNewsRssForQuery(query, forClaim);
-  if (rssLast.length) return rssLast.slice(0, poolTarget);
-  return [];
+  return mockEvidence(forClaim);
 }
 
 /**
@@ -435,50 +438,40 @@ async function searchForClaims(claims, options = {}) {
   const trustedDomainsOnly = options.trustedDomainsOnly !== false;
   const trustedDomains = options.trustedDomains || parseTrustedDomains();
   const perClaimMax = Math.max(2, Number(process.env.NEWSDATA_PER_CLAIM_MAX || 4));
-  const maxClaims = Math.max(1, Number(process.env.NEWSDATA_MAX_CLAIMS || 4));
-  const maxVariants = Math.max(1, Number(process.env.NEWSDATA_QUERY_VARIANTS || 4));
   const list = Array.isArray(claims) ? claims : [];
+  const evidence = [];
   const seenGlobal = new Set();
-
-  async function evidenceForClaim(c) {
+  for (const c of list.slice(0, 5)) {
     const claimText = c.claim ?? String(c);
-    const queries = claimQueryVariants(claimText, c.q || claimText).slice(0, maxVariants);
+    const queries = claimQueryVariants(claimText, c.q || claimText);
     const claimRows = [];
     const seenClaim = new Set();
 
-    for (let i = 0; i < queries.length && claimRows.length < perClaimMax; i += 2) {
-      const batchQueries = queries.slice(i, i + 2);
-      const fetched = await Promise.all(
-        batchQueries.map((q) =>
-          fetchNewsDataForQuery(q, claimText, {
-            trustedDomainsOnly,
-            trustedDomains,
-          }).catch(() => [])
-        )
-      );
-      for (const batch of fetched) {
-        for (const e of batch) {
-          if (!evidenceLooksRelevantToClaim(e, claimText)) continue;
-          const key = `${e.title}|${e.source}|${String(e.desc || "").slice(0, 80)}`;
-          if (seenClaim.has(key) || seenGlobal.has(key)) continue;
-          seenClaim.add(key);
-          seenGlobal.add(key);
-          claimRows.push(e);
-          if (claimRows.length >= perClaimMax) break;
-        }
+    for (const q of queries) {
+      if (claimRows.length >= perClaimMax) break;
+      const batch = await fetchNewsDataForQuery(q, claimText, {
+        trustedDomainsOnly,
+        trustedDomains,
+      });
+      for (const e of batch) {
+        if (!evidenceLooksRelevantToClaim(e, claimText)) continue;
+        const key = `${e.title}|${e.source}|${String(e.desc || "").slice(0, 80)}`;
+        if (seenClaim.has(key) || seenGlobal.has(key)) continue;
+        seenClaim.add(key);
+        seenGlobal.add(key);
+        claimRows.push(e);
         if (claimRows.length >= perClaimMax) break;
       }
     }
-    return claimRows;
+    evidence.push(...claimRows);
   }
-
-  const rows = await Promise.all(list.slice(0, maxClaims).map((c) => evidenceForClaim(c)));
-  return rows.flat();
+  return evidence;
 }
 
 module.exports = {
   searchForClaims,
   fetchNewsDataForQuery,
+  mockEvidence,
   parseTrustedDomains,
   domainsForNewsDataDomainurl,
   filterTrustedEvidence,
