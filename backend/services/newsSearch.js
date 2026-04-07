@@ -231,6 +231,58 @@ function mockEvidence(forClaim) {
   ];
 }
 
+function stripXmlTags(input) {
+  return String(input || "")
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * No-key fallback when NewsData is unavailable.
+ * Uses Google News RSS search to avoid returning placeholders only.
+ */
+async function fetchGoogleNewsRssForQuery(q, forClaim) {
+  const query = buildNewsDataQuery(q, forClaim);
+  const url = new URL("https://news.google.com/rss/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("hl", "en-US");
+  url.searchParams.set("gl", "US");
+  url.searchParams.set("ceid", "US:en");
+
+  try {
+    const res = await fetch(url.toString());
+    const xml = await res.text();
+    if (!res.ok || !xml) return [];
+
+    const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+    const out = [];
+    for (const item of items.slice(0, 10)) {
+      const title = stripXmlTags((item.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] || "");
+      const linkRaw = stripXmlTags((item.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || "");
+      const desc = stripXmlTags((item.match(/<description>([\s\S]*?)<\/description>/i) || [])[1] || "");
+      const sourceName = stripXmlTags((item.match(/<source[^>]*>([\s\S]*?)<\/source>/i) || [])[1] || "");
+      if (!title || !linkRaw) continue;
+      out.push({
+        title,
+        source: sourceName || hostFromLink(linkRaw) || "news.google.com",
+        desc: desc.slice(0, 500),
+        forClaim,
+        link: linkRaw,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * NewsData.io — latest news with pagination until enough trusted-domain rows or pages exhausted.
  * @see https://newsdata.io/documentation
@@ -240,6 +292,8 @@ async function fetchNewsDataForQuery(q, forClaim, options = {}) {
   const apiKey = process.env.NEWSDATA_API_KEY?.trim();
   const query = buildNewsDataQuery(q, forClaim);
   if (!apiKey) {
+    const rssEvidence = await fetchGoogleNewsRssForQuery(query, forClaim);
+    if (rssEvidence.length) return rssEvidence;
     return mockEvidence(forClaim);
   }
 
