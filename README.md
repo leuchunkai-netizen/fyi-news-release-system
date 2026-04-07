@@ -85,7 +85,7 @@ copy backend\.env.example backend\.env
 
 - **Claim extraction** order: Hugging Face first (if `HF_TOKEN` is set), then OpenAI, then a local skeleton.
 - **Fact-check reasoning** uses OpenAI when `OPENAI_API_KEY` is set (`OPENAI_FACTCHECK_MODEL` defaults to `gpt-4o-mini`).
-- Without `NEWSDATA_API_KEY`, evidence search uses **placeholder** mock results until you add a key.
+- Without `NEWSDATA_API_KEY`, evidence search uses Google News RSS; add a key for NewsData.io-backed retrieval.
 
 ---
 
