@@ -13,6 +13,9 @@ export function SubmitTestimonialPage() {
   const [rating, setRating] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitNotice, setSubmitNotice] = useState<string | null>(null);
+  const [submittedStatus, setSubmittedStatus] = useState<"approved" | "pending" | null>(null);
 
   if (!user) {
     return (
@@ -45,17 +48,19 @@ export function SubmitTestimonialPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
+    setSubmitNotice(null);
     if (rating === 0) {
-      alert("Please select a star rating.");
+      setSubmitError("Please select a star rating.");
       return;
     }
     if (!message.trim()) {
-      alert("Please write a short testimonial.");
+      setSubmitError("Please write a short testimonial.");
       return;
     }
     setSubmitting(true);
     try {
-      await addTestimonial(
+      const row = await addTestimonial(
         {
           name: user.name,
           role: displayRole,
@@ -64,15 +69,26 @@ export function SubmitTestimonialPage() {
         },
         user.id
       );
-      setSubmitted(true);
+      const live = row.status === "approved";
+      setSubmittedStatus(live ? "approved" : "pending");
+      if (live) {
+        setSubmitted(true);
+      } else {
+        setSubmitNotice(
+          "Thanks — your testimonial is submitted and queued for review. It will appear publicly after approval."
+        );
+        setMessage("");
+        setRating(0);
+      }
     } catch (err) {
-      alert((err as Error)?.message ?? "Failed to submit testimonial.");
+      setSubmitError((err as Error)?.message ?? "Failed to submit testimonial.");
     } finally {
       setSubmitting(false);
     }
   };
 
   if (submitted) {
+    const live = submittedStatus === "approved";
     return (
       <div className="container mx-auto px-4 py-16">
         <div className="max-w-xl mx-auto border rounded-lg p-8 text-center">
@@ -80,12 +96,25 @@ export function SubmitTestimonialPage() {
             <CheckCircle className="w-14 h-14 text-green-600" />
           </div>
           <h1 className="text-2xl font-semibold mb-3">Thanks — we got it</h1>
-          <p className="text-muted-foreground mb-4">
-            Your testimonial has been submitted. Our AI is checking it before we publish.
-          </p>
-          <p className="text-sm text-muted-foreground mb-8">
-            We hide new testimonials from the site until they’re approved. If it passes review, it’ll show up on the homepage.
-          </p>
+          {live ? (
+            <>
+              <p className="text-muted-foreground mb-4">
+                Your testimonial passed our automated checks and is now visible on the homepage.
+              </p>
+              <p className="text-sm text-muted-foreground mb-8">
+                We still reserve the right to remove content that violates guidelines after publication.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-muted-foreground mb-4">
+                Your testimonial is saved and queued for review. It is not shown publicly until a moderator approves it.
+              </p>
+              <p className="text-sm text-muted-foreground mb-8">
+                Tip: longer, specific feedback is more likely to pass automatically next time.
+              </p>
+            </>
+          )}
           <Link
             to="/"
             className="inline-block px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
@@ -106,6 +135,17 @@ export function SubmitTestimonialPage() {
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {submitNotice && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              {submitNotice}
+            </div>
+          )}
+          {submitError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              {submitError}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium mb-2">Your rating</label>
             <div className="flex items-center gap-2">
@@ -144,9 +184,9 @@ export function SubmitTestimonialPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+            className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-60"
           >
-            Submit testimonial
+            {submitting ? "Submitting..." : "Submit testimonial"}
           </button>
         </form>
       </div>

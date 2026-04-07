@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { getApprovedTestimonials, submitTestimonial } from "@/lib/api";
+import type { TestimonialRow } from "@/lib/types/database";
 
 export type TestimonialStatus = "pending" | "approved" | "rejected";
 
@@ -15,8 +16,11 @@ export interface Testimonial {
 interface TestimonialsContextType {
   /** Approved testimonials from database (for guest landing). */
   approvedTestimonials: Testimonial[];
-  /** Submit a new testimonial; it will be pending until approved by admin. */
-  addTestimonial: (testimonial: Omit<Testimonial, "id" | "status">, userId?: string | null) => Promise<void>;
+  /** Submit a new testimonial; may be auto-approved or left pending for review. */
+  addTestimonial: (
+    testimonial: Omit<Testimonial, "id" | "status">,
+    userId?: string | null
+  ) => Promise<TestimonialRow>;
   refetchApproved: () => Promise<void>;
 }
 
@@ -49,7 +53,7 @@ export function TestimonialsProvider({ children }: { children: ReactNode }) {
 
   const addTestimonial = useCallback(
     async (testimonial: Omit<Testimonial, "id" | "status">, userId?: string | null) => {
-      await submitTestimonial({
+      const row = await submitTestimonial({
         name: testimonial.name,
         role: testimonial.role,
         message: testimonial.message,
@@ -57,6 +61,7 @@ export function TestimonialsProvider({ children }: { children: ReactNode }) {
         user_id: userId ?? null,
       });
       await refetchApproved();
+      return row;
     },
     [refetchApproved]
   );
