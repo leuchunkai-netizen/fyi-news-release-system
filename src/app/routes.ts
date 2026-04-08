@@ -13,6 +13,8 @@ import { ExpertDashboard } from "./pages/ExpertDashboard";
 import { AdminDashboard } from "./pages/AdminDashboard";
 import { SearchPage } from "./pages/SearchPage";
 import { BookmarksPage } from "./pages/BookmarksPage";
+import { ReadingHistoryPage } from "./pages/ReadingHistoryPage";
+import { RedirectOfflineReadingToHistory, RedirectOfflineArticleToArticle } from "./OfflineReadingRedirects";
 import { SubmitTestimonialPage } from "./pages/SubmitTestimonialPage";
 import { EmailVerificationPage } from "./pages/EmailVerificationPage";
 import { BillingPage } from "./pages/BillingPage";
@@ -38,6 +40,9 @@ export const router = createBrowserRouter([
       { path: "admin", Component: AdminDashboard },
       { path: "search", Component: SearchPage },
       { path: "bookmarks", Component: BookmarksPage },
+      { path: "reading-history", Component: ReadingHistoryPage },
+      { path: "offline-reading", Component: RedirectOfflineReadingToHistory },
+      { path: "offline-reading/article/:articleId", Component: RedirectOfflineArticleToArticle },
       { path: "category/:category", Component: HomePage },
       { path: "billing", Component: BillingPage },
       { path: "subscription-manage", Component: SubscriptionPage },

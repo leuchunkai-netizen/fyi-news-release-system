@@ -122,7 +122,7 @@ export function SubscriptionPage() {
             </li>
             <li className="flex items-start gap-2">
               <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-              <span className="text-sm">Offline reading mode</span>
+              <span className="text-sm">Reading history and download articles as HTML for offline reading</span>
             </li>
           </ul>
           {user ? (

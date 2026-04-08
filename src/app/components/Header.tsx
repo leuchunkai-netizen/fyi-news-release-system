@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, Menu, User, LogOut, Settings, Upload, BookMarked, Shield, LayoutDashboard, ChevronDown } from "lucide-react";
+import { Search, Menu, User, LogOut, Settings, Upload, BookMarked, History, Shield, LayoutDashboard, ChevronDown } from "lucide-react";
 import { Link, useLocation } from "react-router";
 import { useUser } from "../context/UserContext";
 import { UserAvatar } from "./UserAvatar";
@@ -88,6 +88,10 @@ export function Header() {
                         <Link to="/bookmarks" className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100">
                           <BookMarked className="w-4 h-4" />
                           Bookmarks
+                        </Link>
+                        <Link to="/reading-history" className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100">
+                          <History className="w-4 h-4" />
+                          Reading history
                         </Link>
                         <Link to="/billing" className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100">
                           <Settings className="w-4 h-4" />

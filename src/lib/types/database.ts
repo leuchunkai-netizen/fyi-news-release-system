@@ -210,6 +210,11 @@ export interface Database {
         Insert: { user_id: string; article_id: string; created_at?: string };
         Update: Partial<Database["public"]["Tables"]["bookmarks"]["Insert"]>;
       };
+      article_read_history: {
+        Row: { user_id: string; article_id: string; viewed_at: string };
+        Insert: { user_id: string; article_id: string; viewed_at?: string };
+        Update: Partial<Database["public"]["Tables"]["article_read_history"]["Insert"]>;
+      };
       article_reports: {
         Row: {
           id: string;

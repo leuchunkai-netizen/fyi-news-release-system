@@ -6,6 +6,7 @@ export * from "./admin";
 export * from "./articles";
 export * from "./auth";
 export * from "./bookmarks";
+export * from "./readHistory";
 export * from "./categories";
 export * from "./comments";
 export * from "./factcheck";

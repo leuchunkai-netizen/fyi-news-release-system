@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
-import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info, Eye, Trash2 } from "lucide-react";
+import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info, Eye, Trash2, Download } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { getArticleById, getCredibilityAnalysis, getRelatedArticles, incrementArticleViews } from "../../lib/api/articles";
+import { tryRecordPremiumArticleRead } from "../../lib/api/readHistory";
+import { downloadOfflineArticleFile } from "../../lib/downloadArticleHtml";
 import { fetchArticleSummary, type ArticleSummaryResult } from "../../lib/api/summary";
 import { getComments, addComment, deleteComment, reportComment } from "../../lib/api/comments";
 import { addBookmark, removeBookmark, isBookmarked } from "../../lib/api/bookmarks";
@@ -117,6 +119,10 @@ export function ArticleDetailPage() {
         }
 
         setArticle(art as ArticleWithCategory);
+
+        if (!cancelled) {
+          await tryRecordPremiumArticleRead(art.id, art.status);
+        }
 
         try {
           const related = await getRelatedArticles({
@@ -509,6 +515,28 @@ export function ArticleDetailPage() {
                     title={bookmarked ? "Remove bookmark" : "Bookmark"}
                   >
                     <Bookmark className={`w-5 h-5 ${bookmarked ? "fill-current" : ""}`} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      article &&
+                      downloadOfflineArticleFile(
+                        {
+                          title: article.title,
+                          author_display_name: article.author_display_name,
+                          published_at: article.published_at,
+                          excerpt: article.excerpt,
+                          content: article.content,
+                          image_url: article.image_url,
+                          siteName: "FYI News",
+                        },
+                        article.title
+                      )
+                    }
+                    className="p-2 border rounded-lg hover:bg-gray-50"
+                    title="Download article as HTML for offline reading"
+                  >
+                    <Download className="w-5 h-5" />
                   </button>
                   <div className="relative">
                     <button
