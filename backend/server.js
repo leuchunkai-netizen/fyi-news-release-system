@@ -15,6 +15,9 @@ const PORT = process.env.PORT || 10000;
 
 const distPath = path.join(__dirname, "..", "dist");
 
+// Required behind Render/Cloudflare so req.ip and rate limiting use X-Forwarded-For safely.
+app.set("trust proxy", 1);
+
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "2mb" }));
 
