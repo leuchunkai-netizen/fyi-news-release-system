@@ -5,10 +5,19 @@ export type SubmitReviewResult = {
   autoApproved: boolean;
   verdict: string;
   confidence: number;
+  baseVerdict?: string;
+  baseConfidence?: number;
   minConfidence: number;
   allowedVerdicts: string[];
   credibilitySaved?: boolean;
   credibilitySaveError?: string | null;
+  sourceEvidenceSummary?: {
+    totalChecks: number;
+    ignoredChecks?: number;
+    supportHigh: number;
+    supportLow: number;
+    contradicts: number;
+  };
 };
 
 async function postJson<T>(url: string, body: unknown, accessToken: string): Promise<T> {
@@ -43,6 +52,15 @@ export async function evaluateSubmitForReview(params: {
   articleId: string;
   title?: string;
   body: string;
+  userSourceChecks?: Array<{
+    claim?: string;
+    sourceUrl?: string;
+    sourceTitle?: string;
+    aiVerdict: "SUPPORT" | "CONTRADICT" | "UNRELATED";
+    sourceCredibility: "HIGH" | "LOW";
+    confidence?: number;
+    reason?: string;
+  }>;
 }): Promise<SubmitReviewResult> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;

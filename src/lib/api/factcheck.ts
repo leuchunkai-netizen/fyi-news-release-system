@@ -17,6 +17,18 @@ export type FactcheckResult = {
   credibilitySaveError?: string | null;
 };
 
+export type ClaimSourceVerifyResult = {
+  url: string;
+  sourceTitle: string;
+  sourceCredibility: "HIGH" | "LOW";
+  aiVerdict: "SUPPORT" | "CONTRADICT" | "UNRELATED";
+  confidence: number;
+  reason: string;
+  evidenceQuote: string;
+  finalDecision: "VERIFIED" | "UNCERTAIN" | "REJECTED";
+  signalCount: number;
+};
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
@@ -37,4 +49,12 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 /** Run the server fact-check pipeline (claims → NewsData.io → optional pgvector/rerank → LLM). Pass `articleId` when editing to persist analysis to `article_credibility_analysis`. */
 export async function factcheckArticle(params: { title?: string; body: string; articleId?: string }) {
   return postJson<FactcheckResult>(apiUrl("/api/articles/factcheck"), params);
+}
+
+export async function verifyClaimSource(params: {
+  claim: string;
+  sourceUrl: string;
+  priorSignals?: Array<{ verdict: "SUPPORT" | "CONTRADICT" | "UNRELATED"; credibility: "HIGH" | "LOW" }>;
+}) {
+  return postJson<ClaimSourceVerifyResult>(apiUrl("/api/articles/verify-claim-source"), params);
 }

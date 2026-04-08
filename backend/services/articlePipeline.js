@@ -50,11 +50,21 @@ async function mergePgvectorCorpusEvidence(claims, evidence) {
 }
 
 /**
+ * Normalize title/body once so draft fact-check and submit-review both evaluate the same cleaned text.
+ */
+function normalizeFactcheckInput(title, body) {
+  const cleanTitle = title != null && String(title).trim() ? filters.stripHtml(String(title)) : undefined;
+  const cleanBody = filters.stripHtml(String(body || ""));
+  return { title: cleanTitle, body: cleanBody };
+}
+
+/**
  * @param {{ title?: string, body: string }} params
  * @returns {Promise<{ ok: true, claims, evidenceTop3, fc } | { ok: false, error: string, stage?: string, status?: number }>}
  */
 async function runFactcheckPipeline(params) {
-  const { title, body } = params || {};
+  const { title: rawTitle, body: rawBody } = params || {};
+  const { title, body } = normalizeFactcheckInput(rawTitle, rawBody);
   const gate = filters.validateForFactcheckPipeline(title, body);
   if (!gate.ok) {
     return { ok: false, error: gate.error, stage: gate.stage, status: 400 };

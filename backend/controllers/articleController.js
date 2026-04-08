@@ -4,6 +4,36 @@ const articleQueries = require("../db/articleQueries");
 const { upsertCredibilityFromFactcheck } = require("../db/credibilityQueries");
 const { getSupabaseAdmin } = require("../db/supabaseClient");
 const { getUserFromBearer } = require("../utils/supabaseAuth");
+const { evaluateClaimAgainstSource, finalDecisionFromSignals } = require("../services/sourceVerification");
+
+function tokenizeForRelevance(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 4);
+}
+
+function checkLooksRelevantToClaims(check, claims) {
+  const claimText = String(check?.claim || "");
+  const sourceText = `${String(check?.sourceTitle || "")} ${String(check?.reason || "")}`.toLowerCase();
+  const claimsList = Array.isArray(claims) ? claims : [];
+  if (claimText) {
+    const hasExact = claimsList.some((c) => String(c?.claim || "").trim() === claimText.trim());
+    if (hasExact) return true;
+  }
+  const srcTokens = new Set(tokenizeForRelevance(sourceText));
+  if (srcTokens.size === 0) return false;
+  for (const c of claimsList) {
+    const claimTokens = tokenizeForRelevance(c?.claim || "");
+    let hits = 0;
+    for (const t of claimTokens) {
+      if (srcTokens.has(t)) hits += 1;
+      if (hits >= 2) return true;
+    }
+  }
+  return false;
+}
 
 async function listArticles(req, res) {
   try {
@@ -151,7 +181,7 @@ async function submitForReview(req, res) {
       return res.status(401).json({ error: "Sign in required, or configure SUPABASE_ANON_KEY on the API server." });
     }
 
-    const { articleId, title, body } = req.body || {};
+    const { articleId, title, body, userSourceChecks } = req.body || {};
     if (!articleId || typeof articleId !== "string") {
       return res.status(400).json({ error: "Missing articleId" });
     }
@@ -184,17 +214,36 @@ async function submitForReview(req, res) {
       });
     }
 
-    const saveCred = await upsertCredibilityFromFactcheck(articleId, result);
-    const credibilitySaveError = saveCred.ok ? null : saveCred.error;
-
     const minConf = Number(process.env.AUTO_APPROVE_MIN_CONFIDENCE ?? 70);
     const allowedVerdicts = (process.env.AUTO_APPROVE_VERDICTS || "VERIFIED,UNCERTAIN")
       .split(",")
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean);
 
-    const verdict = String(result.fc.verdict || "UNCERTAIN").toUpperCase();
-    const confidence = Math.max(0, Math.min(100, Number(result.fc.confidence) || 0));
+    const baseVerdict = String(result.fc.verdict || "UNCERTAIN").toUpperCase();
+    const baseConfidence = Math.max(0, Math.min(100, Number(result.fc.confidence) || 0));
+    const checksRaw = Array.isArray(userSourceChecks) ? userSourceChecks : [];
+    const checks = checksRaw.filter((c) => checkLooksRelevantToClaims(c, result.fc.claims));
+    const supportHigh = checks.filter((c) => c?.aiVerdict === "SUPPORT" && c?.sourceCredibility === "HIGH").length;
+    const supportLow = checks.filter((c) => c?.aiVerdict === "SUPPORT" && c?.sourceCredibility === "LOW").length;
+    const contradicts = checks.filter((c) => c?.aiVerdict === "CONTRADICT").length;
+    let confidence = baseConfidence + Math.min(15, supportHigh * 5) + Math.min(6, supportLow * 2) - contradicts * 12;
+    confidence = Math.max(0, Math.min(100, confidence));
+    let verdict = baseVerdict;
+    if (contradicts > 0) {
+      verdict = "REJECTED";
+    } else if (supportHigh >= 2) {
+      verdict = "VERIFIED";
+    } else if ((supportHigh > 0 || supportLow > 0) && verdict === "REJECTED") {
+      verdict = "UNCERTAIN";
+    }
+
+    const saveCred = await upsertCredibilityFromFactcheck(articleId, result, {
+      userSourceChecks: checks,
+      scoreOverride: Math.round(confidence),
+      verdictOverride: verdict,
+    });
+    const credibilitySaveError = saveCred.ok ? null : saveCred.error;
 
     const verdictOk = allowedVerdicts.includes(verdict);
     const confidenceOk = confidence >= minConf;
@@ -231,13 +280,48 @@ async function submitForReview(req, res) {
       autoApproved,
       verdict,
       confidence,
+      baseVerdict,
+      baseConfidence,
       minConfidence: minConf,
       allowedVerdicts,
       credibilitySaved: saveCred.ok,
       credibilitySaveError,
+      sourceEvidenceSummary: {
+        totalChecks: checks.length,
+        ignoredChecks: checksRaw.length - checks.length,
+        supportHigh,
+        supportLow,
+        contradicts,
+      },
     });
   } catch (e) {
     res.status(500).json({ error: e.message || "Submit review failed" });
+  }
+}
+
+/**
+ * POST /api/articles/verify-claim-source
+ * Verifies one claim against one user-supplied source URL.
+ */
+async function verifyClaimSource(req, res) {
+  try {
+    const { claim, sourceUrl, priorSignals } = req.body || {};
+    if (!claim || typeof claim !== "string") {
+      return res.status(400).json({ error: "Missing claim" });
+    }
+    if (!sourceUrl || typeof sourceUrl !== "string") {
+      return res.status(400).json({ error: "Missing sourceUrl" });
+    }
+    const result = await evaluateClaimAgainstSource({ claim, url: sourceUrl });
+    const signalRows = [...(Array.isArray(priorSignals) ? priorSignals : []), result.signal];
+    const finalDecision = finalDecisionFromSignals(signalRows);
+    return res.json({
+      ...result,
+      finalDecision,
+      signalCount: signalRows.length,
+    });
+  } catch (e) {
+    return res.status(400).json({ error: e.message || "Source verification failed" });
   }
 }
 
@@ -246,4 +330,5 @@ module.exports = {
   factcheck,
   summarize,
   submitForReview,
+  verifyClaimSource,
 };

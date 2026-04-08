@@ -25,4 +25,7 @@ router.post("/summary", heavyLimiter, requireJson, articleController.summarize);
 /** POST /api/articles/submit-review — fact-check + optional auto-publish (rate-limited, requires Bearer token). */
 router.post("/submit-review", heavyLimiter, requireJson, articleController.submitForReview);
 
+/** POST /api/articles/verify-claim-source — verify one claim against a provided URL (rate-limited). */
+router.post("/verify-claim-source", heavyLimiter, requireJson, articleController.verifyClaimSource);
+
 module.exports = router;

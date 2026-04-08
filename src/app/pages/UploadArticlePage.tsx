@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router";
 import { AlertTriangle, ClipboardCheck, Upload, X } from "lucide-react";
 import { useUser } from "../context/UserContext";
-import { factcheckArticle, type FactcheckResult } from "../../lib/api/factcheck";
+import { factcheckArticle, verifyClaimSource, type ClaimSourceVerifyResult, type FactcheckResult } from "../../lib/api/factcheck";
 import { evaluateSubmitForReview } from "../../lib/api/submitReview";
 import { createArticle, getArticleById, updateArticle } from "../../lib/api/articles";
 import { getCategories } from "../../lib/api/categories";
@@ -13,6 +13,20 @@ interface RejectionFinding {
   snippet: string;
   issue: string;
   reason: string;
+}
+
+type ClaimSignal = { verdict: "SUPPORT" | "CONTRADICT" | "UNRELATED"; credibility: "HIGH" | "LOW" };
+
+function estimateSourceDelta(rows: ClaimSourceVerifyResult[]) {
+  const checks = Array.isArray(rows) ? rows : [];
+  const supportHigh = checks.filter((r) => r.aiVerdict === "SUPPORT" && r.sourceCredibility === "HIGH").length;
+  const supportLow = checks.filter((r) => r.aiVerdict === "SUPPORT" && r.sourceCredibility === "LOW").length;
+  const contradicts = checks.filter((r) => r.aiVerdict === "CONTRADICT").length;
+  return Math.min(15, supportHigh * 5) + Math.min(6, supportLow * 2) - contradicts * 12;
+}
+
+function flattenChecksByClaim(allByClaim: Record<number, ClaimSourceVerifyResult[]>) {
+  return Object.values(allByClaim || {}).flatMap((rows) => (Array.isArray(rows) ? rows : []));
 }
 
 function stripHtml(input: string): string {
@@ -53,6 +67,7 @@ export function UploadArticlePage() {
     title: "",
     category: "",
     content: "",
+    imageCaption: "",
   });
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -66,6 +81,10 @@ export function UploadArticlePage() {
   const [factcheckLoading, setFactcheckLoading] = useState(false);
   const [factcheckError, setFactcheckError] = useState<string | null>(null);
   const [factcheckResult, setFactcheckResult] = useState<FactcheckResult | null>(null);
+  const [claimSourceUrls, setClaimSourceUrls] = useState<Record<number, string>>({});
+  const [claimVerifyLoading, setClaimVerifyLoading] = useState<Record<number, boolean>>({});
+  const [claimVerifyErrors, setClaimVerifyErrors] = useState<Record<number, string>>({});
+  const [claimVerifyResults, setClaimVerifyResults] = useState<Record<number, ClaimSourceVerifyResult[]>>({});
 
   useEffect(() => {
     getCategories().then(setCategories).catch(() => setCategories([]));
@@ -92,6 +111,7 @@ export function UploadArticlePage() {
           title: article.title ?? "",
           category: article.category?.slug ?? "",
           content: article.content ?? "",
+          imageCaption: article.excerpt ?? "",
         });
         if (article.status === "rejected") {
           const reason = article.rejection_reason?.trim() || "The article did not meet credibility requirements.";
@@ -144,6 +164,10 @@ export function UploadArticlePage() {
     }
     setFactcheckLoading(true);
     setFactcheckResult(null);
+    setClaimSourceUrls({});
+    setClaimVerifyLoading({});
+    setClaimVerifyErrors({});
+    setClaimVerifyResults({});
     try {
       const result = await factcheckArticle({
         title: title || undefined,
@@ -155,6 +179,40 @@ export function UploadArticlePage() {
       setFactcheckError(err instanceof Error ? err.message : "Fact check failed.");
     } finally {
       setFactcheckLoading(false);
+    }
+  };
+
+  const handleVerifyClaimSource = async (claimIndex: number, claimText: string) => {
+    const sourceUrl = (claimSourceUrls[claimIndex] || "").trim();
+    if (!sourceUrl) {
+      setClaimVerifyErrors((prev) => ({ ...prev, [claimIndex]: "Add a source URL first." }));
+      return;
+    }
+    setClaimVerifyErrors((prev) => ({ ...prev, [claimIndex]: "" }));
+    setClaimVerifyLoading((prev) => ({ ...prev, [claimIndex]: true }));
+    try {
+      const priorSignals: ClaimSignal[] =
+        (claimVerifyResults[claimIndex] || []).map((row) => ({
+          verdict: row.aiVerdict,
+          credibility: row.sourceCredibility,
+        })) ?? [];
+      const result = await verifyClaimSource({
+        claim: claimText,
+        sourceUrl,
+        priorSignals,
+      });
+      setClaimVerifyResults((prev) => ({
+        ...prev,
+        [claimIndex]: [...(prev[claimIndex] || []), result],
+      }));
+      setClaimSourceUrls((prev) => ({ ...prev, [claimIndex]: "" }));
+    } catch (err) {
+      setClaimVerifyErrors((prev) => ({
+        ...prev,
+        [claimIndex]: err instanceof Error ? err.message : "Source check failed.",
+      }));
+    } finally {
+      setClaimVerifyLoading((prev) => ({ ...prev, [claimIndex]: false }));
     }
   };
 
@@ -224,7 +282,7 @@ export function UploadArticlePage() {
       if (isEditing && editingArticleId) {
         await updateArticle(editingArticleId, {
           title,
-          excerpt: null,
+          excerpt: formData.imageCaption.trim() || null,
           content: formData.content.trim() || null,
           image_url,
           category_id,
@@ -237,7 +295,7 @@ export function UploadArticlePage() {
         const created = await createArticle({
           author_id: user.id,
           title,
-          excerpt: null,
+          excerpt: formData.imageCaption.trim() || null,
           content: formData.content.trim() || null,
           image_url,
           author_display_name: user.name,
@@ -249,10 +307,25 @@ export function UploadArticlePage() {
 
       if (!isDraft && resolvedArticleId) {
         try {
+          const checksForSubmit =
+            Array.isArray(factcheckResult?.claims) && factcheckResult?.claims
+              ? factcheckResult.claims.flatMap((claim, idx) =>
+                  (claimVerifyResults[idx] || []).map((r) => ({
+                    claim: claim.claim,
+                    sourceUrl: r.url,
+                    sourceTitle: r.sourceTitle,
+                    aiVerdict: r.aiVerdict,
+                    sourceCredibility: r.sourceCredibility,
+                    confidence: r.confidence,
+                    reason: r.reason,
+                  }))
+                )
+              : [];
           const outcome = await evaluateSubmitForReview({
             articleId: resolvedArticleId,
             title: title || undefined,
             body: formData.content.trim() || "",
+            userSourceChecks: checksForSubmit,
           });
           navigate("/my-articles", {
             state: {
@@ -392,6 +465,16 @@ export function UploadArticlePage() {
                 />
               </label>
             )}
+            <div className="mt-3">
+              <label className="block text-sm font-medium mb-2">Image Caption</label>
+              <input
+                type="text"
+                value={formData.imageCaption}
+                onChange={(e) => setFormData({ ...formData, imageCaption: e.target.value })}
+                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
+                placeholder="Add a short caption for the featured image"
+              />
+            </div>
           </div>
 
           {/* Content */}
@@ -443,13 +526,73 @@ export function UploadArticlePage() {
                 </p>
                 <p className="text-muted-foreground">{factcheckResult.summary}</p>
                 {Array.isArray(factcheckResult.claims) && factcheckResult.claims.length > 0 && (
-                  <ul className="list-disc pl-5 space-y-2">
-                    {factcheckResult.claims.map((c, i) => (
-                      <li key={i}>
-                        <span className="font-medium">{c.verdict}</span>: {c.claim}
-                        {c.why ? <span className="block text-muted-foreground mt-0.5">{c.why}</span> : null}
-                      </li>
-                    ))}
+                  <ul className="space-y-3">
+                    {factcheckResult.claims.map((c, i) => {
+                      const checks = claimVerifyResults[i] || [];
+                      const allChecks = flattenChecksByClaim(claimVerifyResults);
+                      const delta = estimateSourceDelta(allChecks);
+                      const baseConfidence = Math.round(Number(factcheckResult.confidence) || 0);
+                      const adjustedPreview = Math.max(0, Math.min(100, baseConfidence + delta));
+                      return (
+                        <li key={i} className="border border-slate-200 rounded p-3 bg-white">
+                          <p>
+                            <span className="font-medium">{c.verdict}</span>: {c.claim}
+                          </p>
+                          {c.why ? <p className="text-muted-foreground mt-0.5">{c.why}</p> : null}
+
+                          {c.verdict === "UNVERIFIED" && (
+                            <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+                              <p className="text-xs uppercase tracking-wide text-slate-600">Add Source</p>
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <input
+                                  type="url"
+                                  value={claimSourceUrls[i] || ""}
+                                  onChange={(e) =>
+                                    setClaimSourceUrls((prev) => ({ ...prev, [i]: e.target.value }))
+                                  }
+                                  placeholder="https://example.com/article"
+                                  className="flex-1 px-3 py-2 border rounded text-sm"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerifyClaimSource(i, c.claim)}
+                                  disabled={Boolean(claimVerifyLoading[i])}
+                                  className="px-3 py-2 bg-slate-800 text-white rounded text-sm disabled:opacity-50"
+                                >
+                                  {claimVerifyLoading[i] ? "Checking..." : "Re-check"}
+                                </button>
+                              </div>
+                              {claimVerifyErrors[i] ? (
+                                <p className="text-xs text-red-700">{claimVerifyErrors[i]}</p>
+                              ) : null}
+                              {checks.length > 0 &&
+                                checks.map((row, idx) => (
+                                  <div key={idx} className="text-xs border rounded p-2 bg-slate-50 space-y-1">
+                                    <p>
+                                      Source credibility: <span className="font-semibold">{row.sourceCredibility}</span>
+                                      {" · "}
+                                      AI verdict: <span className="font-semibold">{row.aiVerdict}</span>
+                                      {" · "}
+                                      Final decision: <span className="font-semibold">{row.finalDecision}</span>
+                                    </p>
+                                    <p className="text-slate-700">{row.reason}</p>
+                                    {row.evidenceQuote ? (
+                                      <blockquote className="italic border-l-2 border-slate-300 pl-2 text-slate-600">
+                                        "{row.evidenceQuote}"
+                                      </blockquote>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              {checks.length > 0 ? (
+                                <p className="text-xs text-slate-700 bg-slate-100 border border-slate-200 rounded px-2 py-1">
+                                  Added result: Base {baseConfidence}% -&gt; Preview {adjustedPreview}% from all source checks so far.
+                                </p>
+                              ) : null}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
                 {Array.isArray(factcheckResult.top3) && factcheckResult.top3.length > 0 && (

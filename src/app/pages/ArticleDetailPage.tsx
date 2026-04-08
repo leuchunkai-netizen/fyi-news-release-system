@@ -366,10 +366,17 @@ export function ArticleDetailPage() {
 
   const categoryName = (article as ArticleWithCategory).category?.name ?? "Uncategorized";
   const categorySlug = (article as ArticleWithCategory).category?.slug ?? "all";
-  const expertScore = article.credibility_score ?? null;
+  // Use AI score by default; only treat DB credibility_score as expert score after expert verification.
   const aiScore = credibilityAnalysis?.score ?? null;
+  const expertScore = article.is_verified ? article.credibility_score ?? null : null;
   const primaryScore =
-    expertScore != null ? expertScore : aiScore != null ? aiScore : null;
+    aiScore != null
+      ? aiScore
+      : expertScore != null
+        ? expertScore
+        : article.credibility_score != null
+          ? article.credibility_score
+          : null;
 
   const getCredibilityLevel = (score: number) => {
     if (score >= 80) return { level: "High", color: "green", bgColor: "bg-green-50", textColor: "text-green-800", borderColor: "border-green-200" };
@@ -444,7 +451,7 @@ export function ArticleDetailPage() {
                   Credibility Score: {primaryScore}% – {credibilityInfo.level}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {expertScore != null
+                  {article.is_verified && expertScore != null
                     ? "Score from expert review."
                     : hasDbAnalysis
                       ? "Automated fact-check (editor): claims, news evidence, and LLM assessment saved to this article."

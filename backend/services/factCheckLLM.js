@@ -104,7 +104,12 @@ async function evaluateClaims(claims, evidence) {
   try {
     const parsed = JSON.parse(raw);
     const claimResults = Array.isArray(parsed.claims) ? parsed.claims : [];
-    const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 50;
+    const rawConf = parsed.confidence;
+    let confidence =
+      typeof rawConf === "number" && Number.isFinite(rawConf)
+        ? rawConf
+        : Number(String(rawConf ?? "").replace(/%/g, "").trim());
+    if (!Number.isFinite(confidence)) confidence = 50;
     const verdict = ["VERIFIED", "UNCERTAIN", "REJECTED"].includes(parsed.verdict) ? parsed.verdict : "UNCERTAIN";
     const summary = String(parsed.summary || "").trim() || "No summary returned.";
     const normalized = claimResults.map((row, i) => {

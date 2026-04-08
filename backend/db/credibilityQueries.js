@@ -5,8 +5,9 @@ const { mapPipelineToCredibilityRow } = require("../services/credibilityFromFact
  * Upsert credibility analysis from a completed fact-check pipeline run.
  * @param {string} articleId
  * @param {{ ok: true, fc: object, claims: array, top3: array }} pipelineResult
+ * @param {{ userSourceChecks?: Array<object>, scoreOverride?: number, verdictOverride?: string }} [options]
  */
-async function upsertCredibilityFromFactcheck(articleId, pipelineResult) {
+async function upsertCredibilityFromFactcheck(articleId, pipelineResult, options = {}) {
   const sb = getSupabaseAdmin();
   if (!sb) {
     return { ok: false, error: "Supabase service role not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)." };
@@ -16,7 +17,13 @@ async function upsertCredibilityFromFactcheck(articleId, pipelineResult) {
   if (fetchErr) return { ok: false, error: fetchErr.message };
   if (!art) return { ok: false, error: "Article not found" };
 
-  const row = mapPipelineToCredibilityRow(pipelineResult.fc, pipelineResult.claims, pipelineResult.top3);
+  const row = mapPipelineToCredibilityRow(
+    pipelineResult.fc,
+    pipelineResult.claims,
+    pipelineResult.top3,
+    options.userSourceChecks,
+    options
+  );
 
   const { error } = await sb.from("article_credibility_analysis").upsert(
     {

@@ -13,10 +13,33 @@ function isMockEvidenceItem(e) {
  * @param {Array<{ claim?: string, q?: string }>} _claimsList unused; reserved for future weighting
  * @param {Array<{ title?: string, source?: string, desc?: string }>} top3
  */
-function mapPipelineToCredibilityRow(fc, _claimsList, top3) {
-  const confidence = Math.max(0, Math.min(100, typeof fc.confidence === "number" ? fc.confidence : 50));
-  const verdict = fc.verdict || "UNCERTAIN";
-  const claimRows = Array.isArray(fc.claims) ? fc.claims : [];
+function mapPipelineToCredibilityRow(fc, _claimsList, top3, userSourceChecks = [], options = {}) {
+  const baseConfidence = Math.max(0, Math.min(100, typeof fc.confidence === "number" ? fc.confidence : 50));
+  const confidence = Math.max(0, Math.min(100, Number(options.scoreOverride ?? baseConfidence)));
+  const verdict = String(options.verdictOverride || fc.verdict || "UNCERTAIN").toUpperCase();
+  const rawClaimRows = Array.isArray(fc.claims) ? fc.claims : [];
+  const submitted = Array.isArray(userSourceChecks) ? userSourceChecks : [];
+
+  const claimOverride = new Map();
+  for (const s of submitted) {
+    const claim = String(s?.claim || "").trim();
+    if (!claim) continue;
+    const aiVerdict = String(s?.aiVerdict || "").toUpperCase();
+    if (aiVerdict === "CONTRADICT") {
+      claimOverride.set(claim, "DISPUTED");
+      continue;
+    }
+    if (aiVerdict === "SUPPORT" && String(s?.sourceCredibility || "").toUpperCase() === "HIGH") {
+      // High-cred support should mark that claim as supported in saved analysis.
+      claimOverride.set(claim, "SUPPORTED");
+    }
+  }
+
+  const claimRows = rawClaimRows.map((c) => {
+    const claim = String(c?.claim || "").trim();
+    const overrideVerdict = claimOverride.get(claim);
+    return overrideVerdict ? { ...c, verdict: overrideVerdict } : c;
+  });
 
   const supported = claimRows.filter((c) => c.verdict === "SUPPORTED").length;
   const disputed = claimRows.filter((c) => c.verdict === "DISPUTED").length;
@@ -54,6 +77,20 @@ function mapPipelineToCredibilityRow(fc, _claimsList, top3) {
   if (confidence < 35) warnings.push("Low confidence in this automated assessment.");
   if (mockCount > 0 && evidence.length > 0) {
     warnings.push("Some evidence slots used placeholder or mock sources; widen NewsData queries or domains.");
+  }
+
+  const showSources = submitted.slice(0, 6);
+  if (showSources.length > 0) {
+    strengths.push(`User submitted ${submitted.length} source link(s) for re-check.`);
+    for (const s of showSources) {
+      const titleOrUrl = String(s.sourceTitle || s.sourceUrl || "User source");
+      const line = `${String(s.aiVerdict || "UNRELATED")} (${String(s.sourceCredibility || "LOW")}): ${titleOrUrl}`;
+      if (String(s.aiVerdict || "").toUpperCase() === "CONTRADICT") {
+        concerns.push(line.slice(0, 500));
+      } else {
+        strengths.push(line.slice(0, 500));
+      }
+    }
   }
 
   return {
