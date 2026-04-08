@@ -4,7 +4,7 @@ import { AlertTriangle, ClipboardCheck, Upload, X } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { factcheckArticle, verifyClaimSource, type ClaimSourceVerifyResult, type FactcheckResult } from "../../lib/api/factcheck";
 import { evaluateSubmitForReview } from "../../lib/api/submitReview";
-import { createArticle, getArticleById, updateArticle } from "../../lib/api/articles";
+import { createArticle, getArticleById, normalizeArticleTags, updateArticle } from "../../lib/api/articles";
 import { getCategories } from "../../lib/api/categories";
 import { uploadArticleImage } from "../../lib/storage";
 import type { CategoryRow } from "../../lib/types/database";
@@ -68,6 +68,7 @@ export function UploadArticlePage() {
     category: "",
     content: "",
     imageCaption: "",
+    tags: "",
   });
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -112,6 +113,7 @@ export function UploadArticlePage() {
           category: article.category?.slug ?? "",
           content: article.content ?? "",
           imageCaption: article.excerpt ?? "",
+          tags: (article.tags ?? []).join(", "),
         });
         if (article.status === "rejected") {
           const reason = article.rejection_reason?.trim() || "The article did not meet credibility requirements.";
@@ -278,6 +280,7 @@ export function UploadArticlePage() {
       }
 
       let resolvedArticleId = "";
+      const tags = normalizeArticleTags(formData.tags);
 
       if (isEditing && editingArticleId) {
         await updateArticle(editingArticleId, {
@@ -289,6 +292,7 @@ export function UploadArticlePage() {
           status: isDraft ? "draft" : "pending",
           submitted_at: isDraft ? null : new Date().toISOString(),
           rejection_reason: null,
+          tags,
         });
         resolvedArticleId = editingArticleId;
       } else {
@@ -301,6 +305,7 @@ export function UploadArticlePage() {
           author_display_name: user.name,
           category_id,
           status: isDraft ? "draft" : "pending",
+          tags,
         });
         resolvedArticleId = created.id;
       }
@@ -432,6 +437,21 @@ export function UploadArticlePage() {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Tags (comma-separated; used for “Also read” matching) */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Tags</label>
+            <input
+              type="text"
+              value={formData.tags}
+              onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+              className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
+              placeholder="e.g. health, research, nutrition"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Comma-separated. Helps readers find related stories in the same category.
+            </p>
           </div>
 
           {/* Featured Image */}

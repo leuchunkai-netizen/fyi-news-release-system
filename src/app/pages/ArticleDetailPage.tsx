@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
 import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info, Eye, Trash2 } from "lucide-react";
 import { useUser } from "../context/UserContext";
-import { getArticleById, incrementArticleViews, getCredibilityAnalysis } from "../../lib/api/articles";
+import { getArticleById, getCredibilityAnalysis, getRelatedArticles, incrementArticleViews } from "../../lib/api/articles";
 import { fetchArticleSummary, type ArticleSummaryResult } from "../../lib/api/summary";
 import { getComments, addComment, deleteComment, reportComment } from "../../lib/api/comments";
 import { addBookmark, removeBookmark, isBookmarked } from "../../lib/api/bookmarks";
 import type { ArticleWithCategory } from "../../lib/api/articles";
 import type { CommentWithAuthor } from "../../lib/api/comments";
 import { UserAvatar } from "../components/UserAvatar";
+import { RelatedRecommendationsGrid } from "../components/RelatedRecommendationsGrid";
 
 function formatTimeAgo(iso: string | null): string {
   if (!iso) return "";
@@ -95,6 +96,7 @@ export function ArticleDetailPage() {
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
   const [reportingCommentId, setReportingCommentId] = useState<string | null>(null);
   const [credibilityAnalysis, setCredibilityAnalysis] = useState<Awaited<ReturnType<typeof getCredibilityAnalysis>>>(null);
+  const [relatedArticles, setRelatedArticles] = useState<ArticleWithCategory[]>([]);
 
   useEffect(() => {
     if (!id) {
@@ -103,6 +105,7 @@ export function ArticleDetailPage() {
     }
     // stop state updates if component unmounts while requests are running
     let cancelled = false;
+    setRelatedArticles([]);
     (async () => {
       try {
         // load the article first so we can render core content asap
@@ -114,6 +117,18 @@ export function ArticleDetailPage() {
         }
 
         setArticle(art as ArticleWithCategory);
+
+        try {
+          const related = await getRelatedArticles({
+            excludeArticleId: art.id,
+            categoryId: art.category_id,
+            articleTags: art.tags ?? [],
+            limit: 6,
+          });
+          if (!cancelled) setRelatedArticles(related);
+        } catch {
+          if (!cancelled) setRelatedArticles([]);
+        }
 
         // run extra data updates, but do not fail the whole page if one fails
         try {
@@ -861,6 +876,10 @@ export function ArticleDetailPage() {
             ))}
           </div>
         </div>
+
+        {relatedArticles.length > 0 && (
+          <RelatedRecommendationsGrid articles={relatedArticles} />
+        )}
       </div>
     </div>
   );

@@ -90,6 +90,7 @@ export interface Database {
           submitted_at: string | null;
           rejection_reason: string | null;
           views: number;
+          tags: string[];
           created_at: string;
           updated_at: string;
           ai_summary: string | null;
@@ -114,6 +115,7 @@ export interface Database {
           submitted_at?: string | null;
           rejection_reason?: string | null;
           views?: number;
+          tags?: string[];
           created_at?: string;
           updated_at?: string;
           ai_summary?: string | null;

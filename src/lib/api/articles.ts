@@ -15,6 +15,29 @@ export interface TrendingArticleItem {
   publishedAt: string | null;
 }
 
+/** Normalize tags from DB array or comma-separated string (upload form). */
+export function normalizeArticleTags(input: string | string[] | null | undefined): string[] {
+  if (Array.isArray(input)) {
+    return [...new Set(input.map((t) => String(t).trim().toLowerCase()).filter(Boolean))];
+  }
+  if (typeof input === "string" && input.trim()) {
+    return normalizeArticleTags(input.split(","));
+  }
+  return [];
+}
+
+function tagOverlapCount(a: string[], b: string[]): number {
+  const setB = new Set(b);
+  return a.filter((t) => setB.has(t)).length;
+}
+
+/** 2-column grid: only 0, 2, 4, or 6 items so rows stay balanced (no orphan). */
+function takeEvenAlsoReadCount<T>(items: T[], max: number): T[] {
+  const capped = Math.min(items.length, max);
+  const even = Math.floor(capped / 2) * 2;
+  return items.slice(0, even);
+}
+
 /** Fetch published articles (home, search). Optional: filter by category slug, text search, limit, offset. */
 export async function getPublishedArticles(options?: {
   categorySlug?: string;
@@ -79,6 +102,53 @@ export async function getArticleById(id: string) {
   return data as ArticleWithCategory | null;
 }
 
+/**
+ * "Also read": only published articles in the **same category** as the current article.
+ * Never mixes other categories; if fewer than `limit` exist, returns fewer (no backfill).
+ * Within the category, when the current article has tags, sorts by shared-tag count then date.
+ * Returns only an **even** count (0, 2, 4, or up to `limit`) so the 2-column layout never shows an odd last row.
+ */
+export async function getRelatedArticles(options: {
+  excludeArticleId: string;
+  categoryId: string | null;
+  articleTags?: string[] | null;
+  limit?: number;
+}): Promise<ArticleWithCategory[]> {
+  const limit = options.limit ?? 6;
+  if (!options.categoryId) return [];
+
+  const { data, error } = await supabase
+    .from("articles")
+    .select("*, category:categories(name, slug)")
+    .eq("status", "published")
+    .eq("category_id", options.categoryId)
+    .neq("id", options.excludeArticleId)
+    .order("published_at", { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  const rows = (data ?? []) as ArticleWithCategory[];
+  const currentTags = normalizeArticleTags(options.articleTags);
+
+  if (currentTags.length > 0) {
+    const scored = rows.map((a) => ({
+      a,
+      overlap: tagOverlapCount(currentTags, normalizeArticleTags(a.tags)),
+    }));
+    scored.sort((x, y) => {
+      if (y.overlap !== x.overlap) return y.overlap - x.overlap;
+      const tx = new Date(x.a.published_at ?? x.a.created_at ?? 0).getTime();
+      const ty = new Date(y.a.published_at ?? y.a.created_at ?? 0).getTime();
+      return ty - tx;
+    });
+    return takeEvenAlsoReadCount(
+      scored.map((s) => s.a).slice(0, limit),
+      limit
+    );
+  }
+
+  return takeEvenAlsoReadCount(rows.slice(0, limit), limit);
+}
+
 /** Increment article view count (call when viewing detail page). */
 export async function incrementArticleViews(id: string) {
   const { data: row } = await supabase.from("articles").select("views").eq("id", id).single();
@@ -112,11 +182,14 @@ export async function createArticle(insert: {
   author_bio?: string | null;
   category_id?: string | null;
   status?: ArticleStatus;
+  tags?: string[] | null;
 }) {
+  const tags = normalizeArticleTags(insert.tags ?? []);
   const { data, error } = await supabase
     .from("articles")
     .insert({
       ...insert,
+      tags,
       status: insert.status ?? "draft",
       submitted_at: insert.status === "pending" ? new Date().toISOString() : null,
     })
@@ -132,11 +205,25 @@ export async function updateArticle(
   updates: Partial<
     Pick<
       ArticleRow,
-      "title" | "excerpt" | "content" | "image_url" | "author_display_name" | "author_bio" | "category_id" | "status" | "submitted_at" | "rejection_reason"
+      | "title"
+      | "excerpt"
+      | "content"
+      | "image_url"
+      | "author_display_name"
+      | "author_bio"
+      | "category_id"
+      | "status"
+      | "submitted_at"
+      | "rejection_reason"
+      | "tags"
     >
   >
 ) {
-  const { data, error } = await supabase.from("articles").update(updates).eq("id", id).select().single();
+  const payload =
+    updates.tags !== undefined
+      ? { ...updates, tags: normalizeArticleTags(updates.tags) }
+      : updates;
+  const { data, error } = await supabase.from("articles").update(payload).eq("id", id).select().single();
   if (error) throw error;
   return data as ArticleRow;
 }
