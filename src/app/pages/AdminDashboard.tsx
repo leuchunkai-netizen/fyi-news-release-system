@@ -32,13 +32,24 @@ import {
   reassignCategoryArticles,
   getAdminArticleReports,
   updateArticleReportStatus,
+  markCommentReportsReviewed,
 } from "@/lib/api/admin";
 import type { CategoryRow } from "@/lib/types/database";
-import { getArticleById, type ArticleWithCategory } from "@/lib/api/articles";
+import { getArticleById, getArticleByIdForAdminPreview, type ArticleWithCategory } from "@/lib/api/articles";
 import { getUserInterestNames } from "@/lib/api/userInterests";
 
 interface CategoryWithCount extends CategoryRow {
   articleCount: number;
+}
+
+/** DB stores admin-hidden articles as `flagged`; surface as Suspended so it is not confused with Delete. */
+function articleModerationStatusLabel(status: string): string {
+  if (status === "flagged") return "Suspended";
+  if (status === "published") return "Published";
+  if (status === "pending") return "Pending";
+  if (status === "draft") return "Draft";
+  if (status === "rejected") return "Rejected";
+  return status;
 }
 
 export function AdminDashboard() {
@@ -68,6 +79,8 @@ export function AdminDashboard() {
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUser | null>(null);
   const [userDetailInterests, setUserDetailInterests] = useState<string[]>([]);
   const [userDetailInterestsLoading, setUserDetailInterestsLoading] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<AdminReport | null>(null);
+  const [selectedCommentDetail, setSelectedCommentDetail] = useState<AdminComment | null>(null);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [articles, setArticles] = useState<AdminArticle[]>([]);
@@ -134,7 +147,17 @@ export function AdminDashboard() {
 
   const usersFiltered = searchTerm.trim() ? users.filter((u) => u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())) : users;
   const articlesFiltered = searchTerm.trim() ? articles.filter((a) => a.title.toLowerCase().includes(searchTerm.toLowerCase()) || a.author.toLowerCase().includes(searchTerm.toLowerCase())) : articles;
-  const commentsFiltered = searchTerm.trim() ? comments.filter((c) => c.content.toLowerCase().includes(searchTerm.toLowerCase()) || c.author.toLowerCase().includes(searchTerm.toLowerCase())) : comments;
+  const commentsFiltered = searchTerm.trim()
+    ? comments.filter((c) => {
+        const q = searchTerm.toLowerCase();
+        return (
+          c.content.toLowerCase().includes(q) ||
+          c.author.toLowerCase().includes(q) ||
+          c.article.toLowerCase().includes(q) ||
+          (c.pendingReportSummary ?? "").toLowerCase().includes(q)
+        );
+      })
+    : comments;
   const expertApplicationsPending = expertApplications.filter((e) => e.status === "pending");
   const expertsFiltered = searchTerm.trim()
     ? expertApplicationsPending.filter(
@@ -150,7 +173,7 @@ export function AdminDashboard() {
   const tabTitleMap: Record<typeof activeTab, string> = {
     users: "User Management",
     articles: "Content Moderation",
-    comments: "Comment Moderation",
+    comments: "Comment Moderation (flagged & reported)",
     categories: "Category Management",
     experts: "Expert Application Management",
     guestLanding: "Guest Landing",
@@ -218,7 +241,10 @@ export function AdminDashboard() {
     setPreviewArticleError(null);
     setPreviewArticleLoading(true);
     try {
-      const data = await getArticleById(articleId);
+      const data =
+        user?.role === "admin"
+          ? await getArticleByIdForAdminPreview(articleId)
+          : await getArticleById(articleId);
       if (!data) {
         setPreviewArticleError("Article not found.");
         return;
@@ -262,27 +288,103 @@ export function AdminDashboard() {
     }
   };
 
-  const handleCommentAction = async (commentId: string, action: "suspend" | "unsuspend" | "delete") => {
+  const commentInModerationQueue = (c: AdminComment) =>
+    c.status === "flagged" || (c.pendingReportIds?.length ?? 0) > 0;
+
+  const closeCommentDetail = () => setSelectedCommentDetail(null);
+
+  const handleDismissCommentReports = async (commentId: string): Promise<boolean> => {
+    const row = comments.find((c) => c.id === commentId);
+    const ids = row?.pendingReportIds ?? [];
+    if (ids.length === 0) return false;
+    try {
+      await markCommentReportsReviewed(ids);
+      setComments((prev) =>
+        prev
+          .map((c) =>
+            c.id === commentId
+              ? { ...c, pendingReportIds: undefined, pendingReportSummary: undefined }
+              : c
+          )
+          .filter(commentInModerationQueue)
+      );
+      setSelectedCommentDetail((prev) => {
+        if (!prev || prev.id !== commentId) return prev;
+        const next: AdminComment = {
+          ...prev,
+          pendingReportIds: undefined,
+          pendingReportSummary: undefined,
+        };
+        return commentInModerationQueue(next) ? next : null;
+      });
+      alert("User reports marked as reviewed.");
+      return true;
+    } catch (err) {
+      alert((err as Error)?.message ?? "Failed to update reports.");
+      return false;
+    }
+  };
+
+  const handleCommentAction = async (
+    commentId: string,
+    action: "suspend" | "unsuspend" | "delete"
+  ): Promise<boolean> => {
     try {
       if (action === "delete") {
         await deleteComment(commentId);
         setComments((prev) => prev.filter((c) => c.id !== commentId));
+        setSelectedCommentDetail((prev) => (prev?.id === commentId ? null : prev));
         alert("Comment deleted.");
-      } else if (action === "unsuspend") {
+        return true;
+      }
+      if (action === "unsuspend") {
         await updateCommentStatus(commentId, "active");
         setComments((prev) =>
-          prev.map((c) => (c.id === commentId ? { ...c, status: "active" } : c))
+          prev
+            .map((c) => (c.id === commentId ? { ...c, status: "active" } : c))
+            .filter(commentInModerationQueue)
         );
+        setSelectedCommentDetail((prev) => {
+          if (!prev || prev.id !== commentId) return prev;
+          const next: AdminComment = { ...prev, status: "active" };
+          return commentInModerationQueue(next) ? next : null;
+        });
         alert("Comment restored and visible again.");
-      } else {
-        await updateCommentStatus(commentId, "flagged");
-        setComments((prev) =>
-          prev.map((c) => (c.id === commentId ? { ...c, status: "flagged" } : c))
-        );
-        alert("Comment flagged.");
+        return true;
       }
+      const row = comments.find((c) => c.id === commentId);
+      await updateCommentStatus(commentId, "flagged");
+      if (row?.pendingReportIds?.length) {
+        await markCommentReportsReviewed(row.pendingReportIds);
+      }
+      setComments((prev) =>
+        prev
+          .map((c) =>
+            c.id === commentId
+              ? {
+                  ...c,
+                  status: "flagged",
+                  pendingReportIds: undefined,
+                  pendingReportSummary: undefined,
+                }
+              : c
+          )
+          .filter(commentInModerationQueue)
+      );
+      setSelectedCommentDetail((prev) => {
+        if (!prev || prev.id !== commentId) return prev;
+        return {
+          ...prev,
+          status: "flagged",
+          pendingReportIds: undefined,
+          pendingReportSummary: undefined,
+        };
+      });
+      alert("Comment flagged.");
+      return true;
     } catch (err) {
       alert((err as Error)?.message ?? "Action failed.");
+      return false;
     }
   };
 
@@ -328,11 +430,13 @@ export function AdminDashboard() {
     }
   };
 
+  const closeReportDetail = () => setSelectedReport(null);
+
   const handleReportAction = async (
     reportId: string,
     articleId: string,
     action: "suspend" | "ignore"
-  ) => {
+  ): Promise<boolean> => {
     try {
       const reportMeta = reports.find((r) => r.id === reportId);
       if (action === "suspend") {
@@ -340,6 +444,7 @@ export function AdminDashboard() {
       }
       await updateArticleReportStatus(reportId, "reviewed");
       setReports((prev) => prev.filter((r) => r.id !== reportId));
+      setSelectedReport((prev) => (prev?.id === reportId ? null : prev));
       if (action === "suspend") {
         // Ensure the suspended article is visible immediately in Content Moderation.
         setArticles((prev) => {
@@ -373,8 +478,10 @@ export function AdminDashboard() {
           ? "Article suspended (not deleted): hidden from users and kept in Content Moderation."
           : "Report marked as resolved."
       );
+      return true;
     } catch (err) {
       alert((err as Error)?.message ?? "Failed to update report.");
+      return false;
     }
   };
 
@@ -493,7 +600,7 @@ export function AdminDashboard() {
               <MessageSquare className="w-8 h-8 text-purple-600" />
             </div>
             <p className="text-2xl font-bold">{loading ? "—" : comments.length}</p>
-            <p className="text-sm text-muted-foreground">Total Comments</p>
+            <p className="text-sm text-muted-foreground">Comment moderation queue</p>
           </div>
           <div className="border rounded-lg p-6">
             <div className="flex items-center justify-between mb-2">
@@ -695,7 +802,7 @@ export function AdminDashboard() {
                               : "bg-orange-100 text-orange-700"
                         }`}
                       >
-                        {article.status}
+                        {articleModerationStatusLabel(article.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">{article.date}</td>
@@ -721,60 +828,71 @@ export function AdminDashboard() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="px-6 py-3 text-left text-sm font-semibold">Author</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold">Commenter</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Article</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Comment</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold">Reports (anonymous)</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Status</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {commentsFiltered.map((comment) => (
-                  <tr key={comment.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 font-semibold">{comment.author}</td>
-                    <td className="px-6 py-4 text-sm">{comment.article}</td>
-                    <td className="px-6 py-4 text-sm">{comment.content}</td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`px-2 py-1 rounded text-xs ${
-                          comment.status === "active"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-red-100 text-red-700"
-                        }`}
-                      >
-                        {comment.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex gap-2 flex-wrap">
-                        {comment.status === "flagged" ? (
-                          <button
-                            type="button"
-                            onClick={() => handleCommentAction(comment.id, "unsuspend")}
-                            className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                          >
-                            Unsuspend
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleCommentAction(comment.id, "suspend")}
-                            className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700"
-                          >
-                            Suspend
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleCommentAction(comment.id, "delete")}
-                          className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                {commentsFiltered.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-6 py-6 text-sm text-muted-foreground text-center"
+                    >
+                      No flagged comments and no pending user reports. The queue is empty.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  commentsFiltered.map((comment) => (
+                    <tr key={comment.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 font-semibold">{comment.author}</td>
+                      <td className="px-6 py-4 text-sm">{comment.article}</td>
+                      <td className="px-6 py-4 text-sm max-w-xs break-words">{comment.content}</td>
+                      <td className="px-6 py-4 text-sm text-muted-foreground max-w-xs">
+                        {(comment.pendingReportIds?.length ?? 0) > 0 ? (
+                          <>
+                            <span className="text-xs font-medium text-amber-800">
+                              {comment.pendingReportIds!.length} report
+                              {comment.pendingReportIds!.length === 1 ? "" : "s"}
+                            </span>
+                            {comment.pendingReportSummary ? (
+                              <p className="mt-1 text-xs text-gray-700 whitespace-pre-wrap border rounded p-2 bg-amber-50/80">
+                                {comment.pendingReportSummary}
+                              </p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-1">
+                          {comment.status === "flagged" && (
+                            <span className="px-2 py-1 rounded text-xs bg-red-100 text-red-700">Flagged</span>
+                          )}
+                          {(comment.pendingReportIds?.length ?? 0) > 0 && (
+                            <span className="px-2 py-1 rounded text-xs bg-amber-100 text-amber-800">
+                              Reported
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCommentDetail(comment)}
+                          className="px-3 py-1 text-xs border border-slate-300 text-slate-800 rounded hover:bg-slate-50"
+                        >
+                          View details
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -1302,28 +1420,13 @@ export function AdminDashboard() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      {report.status === "pending" ? (
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() =>
-                              handleReportAction(report.id, report.article_id, "suspend")
-                            }
-                            className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
-                          >
-                            Suspend Article
-                          </button>
-                          <button
-                            onClick={() =>
-                              handleReportAction(report.id, report.article_id, "ignore")
-                            }
-                            className="px-3 py-1 text-xs border rounded hover:bg-gray-100"
-                          >
-                            Ignore
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Resolved</span>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedReport(report)}
+                        className="px-3 py-1 text-xs border border-slate-300 text-slate-800 rounded hover:bg-slate-50"
+                      >
+                        View details
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1342,6 +1445,264 @@ export function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* Flagged content: report detail (actions only in modal) */}
+      {selectedReport && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={closeReportDetail}
+          role="presentation"
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-report-detail-title"
+          >
+            <h2 id="admin-report-detail-title" className="text-xl font-semibold mb-2">
+              Flagged article report
+            </h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Review the report below. Suspend hides the article from readers; Ignore marks the report resolved without changing the article.
+            </p>
+
+            <dl className="space-y-3 text-sm border-t pt-4">
+              <div>
+                <dt className="font-medium text-gray-700">Article</dt>
+                <dd className="text-gray-900 font-semibold mt-0.5">{selectedReport.article_title}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Article ID</dt>
+                <dd className="text-gray-900 font-mono text-xs break-all mt-0.5">{selectedReport.article_id}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Reported by</dt>
+                <dd className="text-gray-900 mt-0.5">{selectedReport.reporter_email || "User"}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Reason</dt>
+                <dd className="text-gray-900 whitespace-pre-wrap mt-0.5 border rounded-md p-3 bg-gray-50">
+                  {selectedReport.reason?.trim() || "No reason provided."}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Status</dt>
+                <dd className="mt-0.5">
+                  <span
+                    className={`px-2 py-1 rounded text-xs ${
+                      selectedReport.status === "pending"
+                        ? "bg-orange-100 text-orange-700"
+                        : "bg-green-100 text-green-700"
+                    }`}
+                  >
+                    {selectedReport.status}
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Reported at</dt>
+                <dd className="text-gray-900 mt-0.5">
+                  {selectedReport.created_at
+                    ? new Date(selectedReport.created_at).toLocaleString(undefined, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })
+                    : "—"}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t pt-4">
+              <button
+                type="button"
+                onClick={closeReportDetail}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm order-2 sm:order-1"
+              >
+                Close
+              </button>
+              {selectedReport.status === "pending" ? (
+                <div className="flex flex-wrap gap-2 order-1 sm:order-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await handleReportAction(
+                        selectedReport.id,
+                        selectedReport.article_id,
+                        "ignore"
+                      );
+                      if (ok) closeReportDetail();
+                    }}
+                    className="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50"
+                  >
+                    Ignore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await handleReportAction(
+                        selectedReport.id,
+                        selectedReport.article_id,
+                        "suspend"
+                      );
+                      if (ok) closeReportDetail();
+                    }}
+                    className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+                  >
+                    Suspend article
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground order-1 sm:order-2">
+                  This report is already resolved. No further action is available.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comment moderation: detail (actions only in modal) */}
+      {selectedCommentDetail && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={closeCommentDetail}
+          role="presentation"
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-comment-detail-title"
+          >
+            <h2 id="admin-comment-detail-title" className="text-xl font-semibold mb-2">
+              Comment details
+            </h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Review the comment and user reports below. Suspend hides the comment from the article; Dismiss reports
+              marks user reports as reviewed without changing the comment; Delete removes it permanently.
+            </p>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 mb-4">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">Who wrote this comment</h3>
+              <p className="text-lg font-semibold text-gray-900">{selectedCommentDetail.author}</p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Commenter account ID:{" "}
+                <span className="font-mono text-gray-800 break-all">{selectedCommentDetail.user_id}</span>
+              </p>
+            </div>
+
+            <dl className="space-y-3 text-sm border-t pt-4">
+              <div>
+                <dt className="font-medium text-gray-700">Article</dt>
+                <dd className="text-gray-900 mt-0.5">{selectedCommentDetail.article}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Comment ID</dt>
+                <dd className="text-gray-900 font-mono text-xs break-all mt-0.5">{selectedCommentDetail.id}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Article ID</dt>
+                <dd className="text-gray-900 font-mono text-xs break-all mt-0.5">{selectedCommentDetail.article_id}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700 mb-1">Comment</dt>
+                <dd className="text-gray-900 whitespace-pre-wrap border rounded-md p-3 bg-gray-50 text-sm">
+                  {selectedCommentDetail.content}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">User reports</dt>
+                <dd className="mt-0.5">
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Reporters stay anonymous here—we only show what they wrote, not their names or emails.
+                  </p>
+                  {(selectedCommentDetail.pendingReportIds?.length ?? 0) > 0 ? (
+                    <>
+                      <span className="text-xs font-medium text-amber-800">
+                        {selectedCommentDetail.pendingReportIds!.length} pending report
+                        {selectedCommentDetail.pendingReportIds!.length === 1 ? "" : "s"}
+                      </span>
+                      {selectedCommentDetail.pendingReportSummary ? (
+                        <p className="mt-2 text-sm text-gray-800 whitespace-pre-wrap border rounded-md p-3 bg-amber-50/90">
+                          {selectedCommentDetail.pendingReportSummary}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">None pending</span>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Status</dt>
+                <dd className="mt-0.5 flex flex-wrap gap-1">
+                  {selectedCommentDetail.status === "flagged" && (
+                    <span className="px-2 py-1 rounded text-xs bg-red-100 text-red-700">Flagged</span>
+                  )}
+                  {(selectedCommentDetail.pendingReportIds?.length ?? 0) > 0 && (
+                    <span className="px-2 py-1 rounded text-xs bg-amber-100 text-amber-800">Reported</span>
+                  )}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t pt-4">
+              <button
+                type="button"
+                onClick={closeCommentDetail}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm order-2 sm:order-1"
+              >
+                Close
+              </button>
+              <div className="flex flex-wrap gap-2 justify-end order-1 sm:order-2">
+                {(selectedCommentDetail.pendingReportIds?.length ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleDismissCommentReports(selectedCommentDetail.id);
+                    }}
+                    className="px-4 py-2 text-sm border border-amber-600 text-amber-900 rounded-lg hover:bg-amber-50"
+                  >
+                    Dismiss reports
+                  </button>
+                )}
+                {selectedCommentDetail.status === "flagged" ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleCommentAction(selectedCommentDetail.id, "unsuspend");
+                    }}
+                    className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  >
+                    Unsuspend
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleCommentAction(selectedCommentDetail.id, "suspend");
+                    }}
+                    className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+                  >
+                    Suspend
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleCommentAction(selectedCommentDetail.id, "delete");
+                  }}
+                  className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* User management: profile detail */}
       {selectedUserDetail && (
@@ -1570,7 +1931,7 @@ export function AdminDashboard() {
                             : "bg-orange-100 text-orange-800"
                       }`}
                     >
-                      {previewArticle.status}
+                      {articleModerationStatusLabel(previewArticle.status)}
                     </span>
                     {previewArticle.category?.name && (
                       <span className="text-muted-foreground">{previewArticle.category.name}</span>

@@ -27,6 +27,10 @@ export interface AdminComment {
   status: string;
   article_id: string;
   user_id: string;
+  /** Pending `comment_reports` rows for this comment (admin review queue). */
+  pendingReportIds?: string[];
+  /** Combined reporter reasons (truncated for display). */
+  pendingReportSummary?: string | null;
 }
 
 export interface AdminExpertApplication {
@@ -82,29 +86,110 @@ export async function getAdminArticles(): Promise<AdminArticle[]> {
   }));
 }
 
-/** List all comments for moderation (admin only). */
-export async function getAdminComments(): Promise<AdminComment[]> {
-  // First, load raw comments
-  const { data, error } = await supabase
-    .from("comments")
-    .select("id, content, status, article_id, user_id")
-    .order("created_at", { ascending: false });
+/** Mark user-submitted comment reports as reviewed (admin only). */
+export async function markCommentReportsReviewed(reportIds: string[]): Promise<void> {
+  if (reportIds.length === 0) return;
+  const { error } = await supabase.from("comment_reports").update({ status: "reviewed" }).in("id", reportIds);
   if (error) throw error;
-  const rows = (data ?? []) as {
+}
+
+type AdminCommentRow = {
+  id: string;
+  content: string;
+  status: string;
+  article_id: string;
+  user_id: string;
+  created_at: string;
+  pendingReportIds?: string[];
+  pendingReportSummary?: string | null;
+};
+
+/** Flagged comments plus comments with pending user reports (`comment_reports`). */
+export async function getAdminComments(): Promise<AdminComment[]> {
+  const [reportsRes, flaggedRes] = await Promise.all([
+    supabase
+      .from("comment_reports")
+      .select("id, comment_id, user_id, reason, created_at")
+      .eq("status", "pending"),
+    supabase
+      .from("comments")
+      .select("id, content, status, article_id, user_id, created_at")
+      .eq("status", "flagged")
+      .order("created_at", { ascending: false }),
+  ]);
+  if (reportsRes.error) throw reportsRes.error;
+  if (flaggedRes.error) throw flaggedRes.error;
+
+  const reportRows = (reportsRes.data ?? []) as {
+    id: string;
+    comment_id: string;
+    user_id: string;
+    reason: string | null;
+    created_at: string;
+  }[];
+
+  const byCommentReports = new Map<string, { ids: string[]; summaries: string[]; lastAt: string }>();
+  for (const r of reportRows) {
+    const cur = byCommentReports.get(r.comment_id) ?? { ids: [], summaries: [], lastAt: r.created_at };
+    cur.ids.push(r.id);
+    if (r.reason?.trim()) cur.summaries.push(r.reason.trim());
+    if (new Date(r.created_at) > new Date(cur.lastAt)) cur.lastAt = r.created_at;
+    byCommentReports.set(r.comment_id, cur);
+  }
+
+  const flaggedRows = (flaggedRes.data ?? []) as {
     id: string;
     content: string;
     status: string;
     article_id: string;
     user_id: string;
+    created_at: string;
   }[];
 
-  if (!rows.length) return [];
+  const flaggedById = new Map(flaggedRows.map((c) => [c.id, c]));
+  const extraIds = [...byCommentReports.keys()].filter((id) => !flaggedById.has(id));
 
-  // Best-effort: fetch related article titles and user names.
-  // If RLS or other errors occur, we still return the comments.
+  let extraRows: typeof flaggedRows = [];
+  if (extraIds.length > 0) {
+    const { data: extraData, error: extraErr } = await supabase
+      .from("comments")
+      .select("id, content, status, article_id, user_id, created_at")
+      .in("id", extraIds);
+    if (extraErr) throw extraErr;
+    extraRows = (extraData ?? []) as typeof flaggedRows;
+  }
+
+  const combined: typeof flaggedRows = [...flaggedRows];
+  for (const row of extraRows) {
+    if (!flaggedById.has(row.id)) combined.push(row);
+  }
+
+  const withMeta: AdminCommentRow[] = combined.map((row) => {
+    const rep = byCommentReports.get(row.id);
+    const pendingReportIds = rep?.ids ?? [];
+    const pendingReportSummary =
+      rep && rep.summaries.length > 0
+        ? rep.summaries.slice(0, 3).join(" · ") + (rep.summaries.length > 3 ? " …" : "")
+        : null;
+    return {
+      ...row,
+      ...(pendingReportIds.length > 0 ? { pendingReportIds, pendingReportSummary } : {}),
+    };
+  });
+
+  withMeta.sort((a, b) => {
+    const repA = byCommentReports.get(a.id);
+    const repB = byCommentReports.get(b.id);
+    const tA = Math.max(new Date(a.created_at).getTime(), repA ? new Date(repA.lastAt).getTime() : 0);
+    const tB = Math.max(new Date(b.created_at).getTime(), repB ? new Date(repB.lastAt).getTime() : 0);
+    return tB - tA;
+  });
+
+  if (withMeta.length === 0) return [];
+
   try {
-    const articleIds = Array.from(new Set(rows.map((r) => r.article_id)));
-    const userIds = Array.from(new Set(rows.map((r) => r.user_id)));
+    const articleIds = Array.from(new Set(withMeta.map((r) => r.article_id)));
+    const userIds = Array.from(new Set(withMeta.map((r) => r.user_id)));
 
     const [articlesRes, usersRes] = await Promise.all([
       supabase.from("articles").select("id, title").in("id", articleIds),
@@ -118,7 +203,7 @@ export async function getAdminComments(): Promise<AdminComment[]> {
       (usersRes.data ?? []).map((u: any) => [u.id as string, (u.name as string) ?? ""])
     );
 
-    return rows.map((r) => ({
+    return withMeta.map((r) => ({
       id: r.id,
       author: userMap.get(r.user_id) ?? "Unknown",
       article: articleMap.get(r.article_id) ?? "Unknown",
@@ -126,10 +211,12 @@ export async function getAdminComments(): Promise<AdminComment[]> {
       status: r.status,
       article_id: r.article_id,
       user_id: r.user_id,
+      ...(r.pendingReportIds?.length
+        ? { pendingReportIds: r.pendingReportIds, pendingReportSummary: r.pendingReportSummary ?? null }
+        : {}),
     }));
   } catch {
-    // Fallback: return comments without joined details
-    return rows.map((r) => ({
+    return withMeta.map((r) => ({
       id: r.id,
       author: "Unknown",
       article: "Unknown",
@@ -137,6 +224,9 @@ export async function getAdminComments(): Promise<AdminComment[]> {
       status: r.status,
       article_id: r.article_id,
       user_id: r.user_id,
+      ...(r.pendingReportIds?.length
+        ? { pendingReportIds: r.pendingReportIds, pendingReportSummary: r.pendingReportSummary ?? null }
+        : {}),
     }));
   }
 }
@@ -304,6 +394,7 @@ export async function getAdminArticleReports(): Promise<AdminReport[]> {
   const { data, error } = await supabase
     .from("article_reports")
     .select("id, article_id, user_id, reason, status, created_at")
+    .eq("status", "pending")
     .order("created_at", { ascending: false });
   if (error) throw error;
   const rows = (data ?? []) as {

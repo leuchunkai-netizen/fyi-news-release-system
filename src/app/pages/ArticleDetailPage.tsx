@@ -177,7 +177,11 @@ export function ArticleDetailPage() {
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
-  const [reportingCommentId, setReportingCommentId] = useState<string | null>(null);
+  const [commentReportOpenFor, setCommentReportOpenFor] = useState<string | null>(null);
+  const [commentReportReason, setCommentReportReason] = useState("");
+  const [commentReportError, setCommentReportError] = useState<string | null>(null);
+  const [commentReportSubmitting, setCommentReportSubmitting] = useState(false);
+  const [commentReportSucceededId, setCommentReportSucceededId] = useState<string | null>(null);
   const [credibilityAnalysis, setCredibilityAnalysis] = useState<Awaited<ReturnType<typeof getCredibilityAnalysis>>>(null);
   const [relatedArticles, setRelatedArticles] = useState<ArticleWithCategory[]>([]);
 
@@ -290,6 +294,11 @@ export function ArticleDetailPage() {
     setAiSummary(null);
     setAiSummaryError(null);
     setAiSummaryLoading(false);
+    setCommentReportOpenFor(null);
+    setCommentReportReason("");
+    setCommentReportError(null);
+    setCommentReportSubmitting(false);
+    setCommentReportSucceededId(null);
   }, [id]);
 
   useEffect(() => {
@@ -416,22 +425,53 @@ export function ArticleDetailPage() {
     }
   };
 
-  const handleReportComment = async (commentId: string, commentAuthorId: string) => {
-    if (!user || reportingCommentId) return;
-    if (commentAuthorId === user.id) return;
+  const openCommentReport = (commentId: string) => {
+    if (!user) return;
+    const target = comments.find((c) => c.id === commentId);
+    if (!target || target.user_id === user.id) return;
+    setCommentReportOpenFor(commentId);
+    setCommentReportReason("");
+    setCommentReportError(null);
+  };
 
-    const reasonInput = window.prompt("Why are you flagging this comment?");
-    const reason = reasonInput?.trim() ?? "";
-    if (!reason) return;
+  const closeCommentReport = () => {
+    if (commentReportSubmitting) return;
+    setCommentReportOpenFor(null);
+    setCommentReportReason("");
+    setCommentReportError(null);
+  };
 
-    setReportingCommentId(commentId);
+  const handleSubmitCommentReport = async () => {
+    if (!user || !commentReportOpenFor || commentReportSubmitting) return;
+    const target = comments.find((c) => c.id === commentReportOpenFor);
+    if (!target || target.user_id === user.id) {
+      setCommentReportOpenFor(null);
+      return;
+    }
+    const reason = commentReportReason.trim();
+    if (!reason) {
+      setCommentReportError("Please describe why this comment concerns you.");
+      return;
+    }
+    if (reason.length > 500) {
+      setCommentReportError("Please keep your reason under 500 characters.");
+      return;
+    }
+    setCommentReportSubmitting(true);
+    setCommentReportError(null);
+    const reportedId = commentReportOpenFor;
     try {
-      await reportComment(commentId, user.id, reason);
-      alert("Report submitted. Admins will review this comment.");
+      await reportComment(reportedId, user.id, reason);
+      setCommentReportSucceededId(reportedId);
+      setCommentReportOpenFor(null);
+      setCommentReportReason("");
+      window.setTimeout(() => {
+        setCommentReportSucceededId((cur) => (cur === reportedId ? null : cur));
+      }, 10000);
     } catch (err) {
-      alert((err as Error)?.message ?? "Could not flag this comment.");
+      setCommentReportError(err instanceof Error ? err.message : "Could not submit report.");
     } finally {
-      setReportingCommentId(null);
+      setCommentReportSubmitting(false);
     }
   };
 
@@ -1053,10 +1093,21 @@ export function ArticleDetailPage() {
           )}
 
         <div>
-          <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
+          <h2 className="text-2xl font-semibold mb-2 flex items-center gap-2">
             <MessageCircle className="w-6 h-6" />
             Comments ({comments.length})
           </h2>
+          {user ? (
+            <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
+              <p className="font-medium text-amber-900 mb-1">How reporting works</p>
+              <p className="text-amber-900/90 leading-relaxed">
+                Use <strong className="text-amber-950">Report</strong> on someone else&apos;s comment when you see spam,
+                harassment, misinformation, or other rule-breaking content. You&apos;ll be asked for a short reason so
+                moderators can review fairly. The comment is <strong className="text-amber-950">not</strong> removed
+                immediately—it goes to our team first. Thank you for helping keep discussions respectful.
+              </p>
+            </div>
+          ) : null}
 
           {user ? (
             <form onSubmit={handleCommentSubmit} className="mb-8">
@@ -1105,18 +1156,20 @@ export function ArticleDetailPage() {
                     </div>
                     {user && (
                       <div className="flex items-center gap-3">
-                        {c.user_id !== user.id && (
-                          <button
-                            type="button"
-                            onClick={() => handleReportComment(c.id, c.user_id)}
-                            disabled={reportingCommentId === c.id}
-                            className="inline-flex items-center gap-1 text-xs text-orange-600 hover:text-orange-700 disabled:opacity-50"
-                            title="Flag this comment"
-                          >
-                            <Flag className="w-3.5 h-3.5" />
-                            {reportingCommentId === c.id ? "Flagging..." : "Flag"}
-                          </button>
-                        )}
+                        {c.user_id !== user.id &&
+                          (commentReportSucceededId === c.id ? (
+                            <span className="text-xs font-medium text-green-700">Report received — thanks</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => openCommentReport(c.id)}
+                              className="inline-flex items-center gap-1 text-xs text-orange-600 hover:text-orange-700"
+                              title="Report this comment to moderators"
+                            >
+                              <Flag className="w-3.5 h-3.5" />
+                              Report
+                            </button>
+                          ))}
                         {c.user_id === user.id && (
                           <button
                             type="button"
@@ -1183,6 +1236,66 @@ export function ArticleDetailPage() {
           <RelatedRecommendationsGrid articles={relatedArticles} />
         )}
       </div>
+
+      {commentReportOpenFor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={closeCommentReport}
+          role="presentation"
+        >
+          <div
+            className="w-full max-w-md rounded-lg border bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="comment-report-title"
+          >
+            <h3 id="comment-report-title" className="text-lg font-semibold text-gray-900 mb-2">
+              Report this comment
+            </h3>
+            <p className="text-sm text-muted-foreground mb-3">
+              Your report is sent to moderators with the reason below. They will review it against our community
+              rules. The comment may be hidden or left visible depending on that review—you won&apos;t always get a
+              personal reply, but every report is read.
+            </p>
+            <label htmlFor="comment-report-reason" className="block text-sm font-medium text-gray-800 mb-1">
+              Why are you reporting this? <span className="text-red-600">*</span>
+            </label>
+            <textarea
+              id="comment-report-reason"
+              value={commentReportReason}
+              onChange={(e) => {
+                setCommentReportReason(e.target.value);
+                if (commentReportError) setCommentReportError(null);
+              }}
+              rows={4}
+              maxLength={500}
+              className="w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-600"
+              placeholder="e.g. Spam link, personal attack, false claim about…"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">{commentReportReason.trim().length}/500</p>
+            {commentReportError && <p className="mt-2 text-sm text-red-600">{commentReportError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeCommentReport}
+                disabled={commentReportSubmitting}
+                className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSubmitCommentReport()}
+                disabled={commentReportSubmitting || !commentReportReason.trim()}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {commentReportSubmitting ? "Submitting…" : "Submit report"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

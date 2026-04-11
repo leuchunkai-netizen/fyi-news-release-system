@@ -107,15 +107,32 @@ export async function getPublishedArticles(options?: {
   }));
 }
 
-/** Fetch a single published article by id (for detail page). */
+/** Fetch a single article by id (respects RLS). Uses maybeSingle so missing rows do not produce HTTP 406. */
 export async function getArticleById(id: string) {
   const { data, error } = await supabase
     .from("articles")
     .select("*, category:categories(id, name, slug)")
     .eq("id", id)
-    .single();
+    .maybeSingle();
   if (error) throw error;
-  return data as ArticleWithCategory | null;
+  return (data ?? null) as ArticleWithCategory | null;
+}
+
+/**
+ * Admin Content Moderation preview: full article + category regardless of status,
+ * via SECURITY DEFINER RPC (avoids 406 / empty result when direct select is not visible under RLS).
+ */
+export async function getArticleByIdForAdminPreview(id: string): Promise<ArticleWithCategory | null> {
+  const { data, error } = await supabase.rpc("admin_get_article_preview", { p_article_id: id });
+  if (error) {
+    const code = (error as { code?: string }).code;
+    const msg = error.message ?? "";
+    if (code === "42883" || msg.includes("admin_get_article_preview")) {
+      return getArticleById(id);
+    }
+    throw error;
+  }
+  return (data ?? null) as ArticleWithCategory | null;
 }
 
 /**
@@ -167,8 +184,8 @@ export async function getRelatedArticles(options: {
 
 /** Increment article view count (call when viewing detail page). */
 export async function incrementArticleViews(id: string) {
-  const { data: row } = await supabase.from("articles").select("views").eq("id", id).single();
-  if (!row) return;
+  const { data: row, error: rowErr } = await supabase.from("articles").select("views").eq("id", id).maybeSingle();
+  if (rowErr || !row) return;
   const { error } = await supabase
     .from("articles")
     .update({ views: (row.views ?? 0) + 1 })
