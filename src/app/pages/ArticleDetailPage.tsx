@@ -23,7 +23,7 @@ import {
 import { addBookmark, removeBookmark, isBookmarked } from "../../lib/api/bookmarks";
 import type { ArticleWithCategory } from "../../lib/api/articles";
 import type { ExpertReviewRow } from "../../lib/types/database";
-import { hasPremiumBenefits } from "../../lib/userRoles";
+import { hasPremiumBenefits, canViewArticleSummary } from "../../lib/userRoles";
 import { UserAvatar } from "../components/UserAvatar";
 import { RelatedRecommendationsGrid } from "../components/RelatedRecommendationsGrid";
 
@@ -760,7 +760,7 @@ export function ArticleDetailPage() {
           </div>
         </div>
 
-        {user && hasPremiumBenefits(user.role) && (
+        {user && canViewArticleSummary(user.role) && (
           <div className="mb-6 border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-blue-50">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
