@@ -1,7 +1,7 @@
 import { useId, useState, useEffect, useMemo } from "react";
-import { Link } from "react-router";
 import { Users, FileText, MessageSquare, Tag, Ban, Search, Plus, Edit, Trash2, Shield, LayoutDashboard } from "lucide-react";
 import { useUser } from "../context/UserContext";
+import { UserAvatar } from "../components/UserAvatar";
 import { useGuestLanding, type IntroSlide, type VideoSection } from "../context/GuestLandingContext";
 import { uploadGuestSlideImage } from "@/lib/storage";
 import {
@@ -34,6 +34,8 @@ import {
   updateArticleReportStatus,
 } from "@/lib/api/admin";
 import type { CategoryRow } from "@/lib/types/database";
+import { getArticleById, type ArticleWithCategory } from "@/lib/api/articles";
+import { getUserInterestNames } from "@/lib/api/userInterests";
 
 interface CategoryWithCount extends CategoryRow {
   articleCount: number;
@@ -59,6 +61,13 @@ export function AdminDashboard() {
   const [deletingCategory, setDeletingCategory] = useState<CategoryWithCount | null>(null);
   const [reassignCategoryId, setReassignCategoryId] = useState<string>("");
   const [selectedExpert, setSelectedExpert] = useState<AdminExpertApplication | null>(null);
+  const [previewArticleId, setPreviewArticleId] = useState<string | null>(null);
+  const [previewArticle, setPreviewArticle] = useState<ArticleWithCategory | null>(null);
+  const [previewArticleLoading, setPreviewArticleLoading] = useState(false);
+  const [previewArticleError, setPreviewArticleError] = useState<string | null>(null);
+  const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUser | null>(null);
+  const [userDetailInterests, setUserDetailInterests] = useState<string[]>([]);
+  const [userDetailInterestsLoading, setUserDetailInterestsLoading] = useState(false);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [articles, setArticles] = useState<AdminArticle[]>([]);
@@ -126,7 +135,14 @@ export function AdminDashboard() {
   const usersFiltered = searchTerm.trim() ? users.filter((u) => u.name.toLowerCase().includes(searchTerm.toLowerCase()) || u.email.toLowerCase().includes(searchTerm.toLowerCase())) : users;
   const articlesFiltered = searchTerm.trim() ? articles.filter((a) => a.title.toLowerCase().includes(searchTerm.toLowerCase()) || a.author.toLowerCase().includes(searchTerm.toLowerCase())) : articles;
   const commentsFiltered = searchTerm.trim() ? comments.filter((c) => c.content.toLowerCase().includes(searchTerm.toLowerCase()) || c.author.toLowerCase().includes(searchTerm.toLowerCase())) : comments;
-  const expertsFiltered = searchTerm.trim() ? expertApplications.filter((e) => e.name.toLowerCase().includes(searchTerm.toLowerCase()) || e.expertise.toLowerCase().includes(searchTerm.toLowerCase())) : expertApplications;
+  const expertApplicationsPending = expertApplications.filter((e) => e.status === "pending");
+  const expertsFiltered = searchTerm.trim()
+    ? expertApplicationsPending.filter(
+        (e) =>
+          e.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          e.expertise.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : expertApplicationsPending;
   const categoriesFiltered = searchTerm.trim() ? categories.filter((c) => c.name.toLowerCase().includes(searchTerm.toLowerCase())) : categories;
   const reportsFiltered = searchTerm.trim()
     ? reports.filter((r) => r.article_title.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -141,11 +157,34 @@ export function AdminDashboard() {
     reports: "Flagged Content",
   };
 
+  const closeUserDetail = () => {
+    setSelectedUserDetail(null);
+    setUserDetailInterests([]);
+    setUserDetailInterestsLoading(false);
+  };
+
+  const openUserDetail = async (u: AdminUser) => {
+    setSelectedUserDetail(u);
+    setUserDetailInterests([]);
+    setUserDetailInterestsLoading(true);
+    try {
+      const names = await getUserInterestNames(u.id);
+      setUserDetailInterests(names);
+    } catch {
+      setUserDetailInterests([]);
+    } finally {
+      setUserDetailInterestsLoading(false);
+    }
+  };
+
   const handleUserAction = async (userId: string, action: "suspend" | "unsuspend") => {
     try {
       await updateUserStatus(userId, action === "suspend" ? "suspended" : "active");
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, status: action === "suspend" ? "suspended" : "active" } : u))
+      );
+      setSelectedUserDetail((prev) =>
+        prev?.id === userId ? { ...prev, status: action === "suspend" ? "suspended" : "active" } : prev
       );
       alert(`User ${action === "suspend" ? "suspended" : "unsuspended"}.`);
     } catch (err) {
@@ -159,9 +198,36 @@ export function AdminDashboard() {
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, role: "free" } : u))
       );
+      setSelectedUserDetail((prev) => (prev?.id === userId ? { ...prev, role: "free" } : prev));
       alert("Expert role revoked. User is now a free member.");
     } catch (err) {
       alert((err as Error)?.message ?? "Failed to update user role.");
+    }
+  };
+
+  const closeArticlePreview = () => {
+    setPreviewArticleId(null);
+    setPreviewArticle(null);
+    setPreviewArticleError(null);
+    setPreviewArticleLoading(false);
+  };
+
+  const openArticlePreview = async (articleId: string) => {
+    setPreviewArticleId(articleId);
+    setPreviewArticle(null);
+    setPreviewArticleError(null);
+    setPreviewArticleLoading(true);
+    try {
+      const data = await getArticleById(articleId);
+      if (!data) {
+        setPreviewArticleError("Article not found.");
+        return;
+      }
+      setPreviewArticle(data);
+    } catch (e) {
+      setPreviewArticleError((e as Error)?.message ?? "Could not load article.");
+    } finally {
+      setPreviewArticleLoading(false);
     }
   };
 
@@ -170,17 +236,24 @@ export function AdminDashboard() {
       if (action === "delete") {
         await deleteArticle(articleId);
         setArticles((prev) => prev.filter((a) => a.id !== articleId));
+        if (previewArticleId === articleId) closeArticlePreview();
         alert("Article deleted.");
       } else if (action === "unsuspend") {
         await updateArticleStatus(articleId, "published");
         setArticles((prev) =>
           prev.map((a) => (a.id === articleId ? { ...a, status: "published" } : a))
         );
+        setPreviewArticle((prev) =>
+          prev?.id === articleId ? { ...prev, status: "published" } : prev
+        );
         alert("Article unsuspended and published again.");
       } else {
         await updateArticleStatus(articleId, "flagged");
         setArticles((prev) =>
           prev.map((a) => (a.id === articleId ? { ...a, status: "flagged" } : a))
+        );
+        setPreviewArticle((prev) =>
+          prev?.id === articleId ? { ...prev, status: "flagged" } : prev
         );
         alert("Article suspended.");
       }
@@ -189,12 +262,18 @@ export function AdminDashboard() {
     }
   };
 
-  const handleCommentAction = async (commentId: string, action: "suspend" | "delete") => {
+  const handleCommentAction = async (commentId: string, action: "suspend" | "unsuspend" | "delete") => {
     try {
       if (action === "delete") {
         await deleteComment(commentId);
         setComments((prev) => prev.filter((c) => c.id !== commentId));
         alert("Comment deleted.");
+      } else if (action === "unsuspend") {
+        await updateCommentStatus(commentId, "active");
+        setComments((prev) =>
+          prev.map((c) => (c.id === commentId ? { ...c, status: "active" } : c))
+        );
+        alert("Comment restored and visible again.");
       } else {
         await updateCommentStatus(commentId, "flagged");
         setComments((prev) =>
@@ -229,19 +308,23 @@ export function AdminDashboard() {
     }
   };
 
-  const handleExpertAction = async (expertId: string, action: "approve" | "reject") => {
+  /** Returns true if the server update succeeded (DB expects approved | rejected). */
+  const handleExpertAction = async (expertId: string, action: "approve" | "reject"): Promise<boolean> => {
+    const nextStatus = action === "approve" ? "approved" : "rejected";
     try {
-      await updateExpertApplicationStatus(expertId, action, user?.id);
+      await updateExpertApplicationStatus(expertId, nextStatus, user?.id);
       setExpertApplications((prev) =>
-        prev.map((e) => (e.id === expertId ? { ...e, status: action } : e))
+        prev.map((e) => (e.id === expertId ? { ...e, status: nextStatus } : e))
       );
       alert(
         action === "approve"
           ? "Expert application approved. User now has expert role."
           : "Expert application rejected."
       );
+      return true;
     } catch (err) {
       alert((err as Error)?.message ?? "Action failed.");
+      return false;
     }
   };
 
@@ -569,28 +652,13 @@ export function AdminDashboard() {
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">{u.joined ?? ""}</td>
                     <td className="px-6 py-4">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() =>
-                            handleUserAction(u.id, u.status === "active" ? "suspend" : "unsuspend")
-                          }
-                          className={`px-3 py-1 text-xs rounded ${
-                            u.status === "active"
-                              ? "bg-red-600 text-white hover:bg-red-700"
-                              : "bg-green-600 text-white hover:bg-green-700"
-                          }`}
-                        >
-                          {u.status === "active" ? "Suspend" : "Unsuspend"}
-                        </button>
-                        {u.role === "expert" && (
-                          <button
-                            onClick={() => handleRevokeExpert(u.id)}
-                            className="px-3 py-1 text-xs border border-blue-600 text-blue-600 rounded hover:bg-blue-50"
-                          >
-                            Revoke Expert
-                          </button>
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openUserDetail(u)}
+                        className="px-3 py-1 text-xs border border-slate-300 text-slate-800 rounded hover:bg-slate-50"
+                      >
+                        View details
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -632,35 +700,13 @@ export function AdminDashboard() {
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground">{article.date}</td>
                     <td className="px-6 py-4">
-                      <div className="flex gap-2 flex-wrap">
-                        <Link
-                          to={`/article/${article.id}`}
-                          className="inline-flex items-center px-3 py-1 text-xs border border-slate-300 text-slate-800 rounded hover:bg-slate-50"
-                        >
-                          View article
-                        </Link>
-                        {article.status === "flagged" ? (
-                          <button
-                            onClick={() => handleArticleAction(article.id, "unsuspend")}
-                            className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                          >
-                            Unsuspend
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleArticleAction(article.id, "suspend")}
-                            className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700"
-                          >
-                            Suspend
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleArticleAction(article.id, "delete")}
-                          className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openArticlePreview(article.id)}
+                        className="inline-flex items-center px-3 py-1 text-xs border border-slate-300 text-slate-800 rounded hover:bg-slate-50"
+                      >
+                        View article
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -700,14 +746,26 @@ export function AdminDashboard() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap">
+                        {comment.status === "flagged" ? (
+                          <button
+                            type="button"
+                            onClick={() => handleCommentAction(comment.id, "unsuspend")}
+                            className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                          >
+                            Unsuspend
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleCommentAction(comment.id, "suspend")}
+                            className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700"
+                          >
+                            Suspend
+                          </button>
+                        )}
                         <button
-                          onClick={() => handleCommentAction(comment.id, "suspend")}
-                          className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700"
-                        >
-                          Suspend
-                        </button>
-                        <button
+                          type="button"
                           onClick={() => handleCommentAction(comment.id, "delete")}
                           className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
                         >
@@ -996,50 +1054,42 @@ export function AdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {expertsFiltered.map((expert) => (
-                  <tr key={expert.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div>
-                        <p className="font-semibold">{expert.name}</p>
-                        <p className="text-sm text-muted-foreground">{expert.email}</p>
-                      </div>
+                {expertsFiltered.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-6 text-sm text-muted-foreground text-center">
+                      No pending expert applications. Approved and rejected applications are not listed here.
                     </td>
-                    <td className="px-6 py-4">
-                      <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
-                        {expert.expertise}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm max-w-xs">
-                      <p className="truncate">{expert.credentials}</p>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">{expert.appliedDate}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleExpertAction(expert.id, "approve")}
-                          className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleExpertAction(expert.id, "reject")}
-                          className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
-                        >
-                          Reject
-                        </button>
+                  </tr>
+                ) : (
+                  expertsFiltered.map((expert) => (
+                    <tr key={expert.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4">
+                        <div>
+                          <p className="font-semibold">{expert.name}</p>
+                          <p className="text-sm text-muted-foreground">{expert.email}</p>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
+                          {expert.expertise}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm max-w-xs">
+                        <p className="truncate">{expert.credentials}</p>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-muted-foreground">{expert.appliedDate}</td>
+                      <td className="px-6 py-4">
                         <button
                           type="button"
                           onClick={() => setSelectedExpert(expert)}
                           className="px-3 py-1 text-xs border rounded hover:bg-gray-100"
                         >
-                          View Details
+                          View details
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -1293,6 +1343,308 @@ export function AdminDashboard() {
         )}
       </div>
 
+      {/* User management: profile detail */}
+      {selectedUserDetail && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={closeUserDetail}
+          role="presentation"
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-user-detail-title"
+          >
+            <div className="flex items-start gap-4 mb-4">
+              <UserAvatar
+                avatar={selectedUserDetail.avatar}
+                name={selectedUserDetail.name}
+                size="lg"
+                className="shrink-0"
+              />
+              <div className="min-w-0">
+                <h2 id="admin-user-detail-title" className="text-xl font-semibold truncate">
+                  {selectedUserDetail.name}
+                </h2>
+                <p className="text-sm text-muted-foreground break-all">{selectedUserDetail.email}</p>
+              </div>
+            </div>
+
+            <dl className="space-y-3 text-sm border-t pt-4">
+              <div>
+                <dt className="font-medium text-gray-700">User ID</dt>
+                <dd className="text-gray-900 font-mono text-xs break-all mt-0.5">{selectedUserDetail.id}</dd>
+              </div>
+              <div className="flex flex-wrap gap-4">
+                <div>
+                  <dt className="font-medium text-gray-700">Role</dt>
+                  <dd className="text-gray-900 capitalize mt-0.5">{selectedUserDetail.role}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-gray-700">Account status</dt>
+                  <dd className="text-gray-900 capitalize mt-0.5">{selectedUserDetail.status}</dd>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-4">
+                <div>
+                  <dt className="font-medium text-gray-700">Gender</dt>
+                  <dd className="text-gray-900 mt-0.5">{selectedUserDetail.gender ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-gray-700">Age</dt>
+                  <dd className="text-gray-900 mt-0.5">
+                    {selectedUserDetail.age != null ? selectedUserDetail.age : "—"}
+                  </dd>
+                </div>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Location</dt>
+                <dd className="text-gray-900 mt-0.5">{selectedUserDetail.location?.trim() || "—"}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Website</dt>
+                <dd className="text-gray-900 mt-0.5 break-all">
+                  {(() => {
+                    const w = selectedUserDetail.website?.trim();
+                    if (!w) return "—";
+                    const href =
+                      w.startsWith("http://") || w.startsWith("https://") ? w : `https://${w}`;
+                    return (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-red-600 hover:underline"
+                      >
+                        {w}
+                      </a>
+                    );
+                  })()}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Email verified</dt>
+                <dd className="text-gray-900 mt-0.5">
+                  {selectedUserDetail.email_verified_at
+                    ? new Date(selectedUserDetail.email_verified_at).toLocaleString(undefined, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Joined</dt>
+                <dd className="text-gray-900 mt-0.5">
+                  {selectedUserDetail.joined ??
+                    (selectedUserDetail.created_at
+                      ? new Date(selectedUserDetail.created_at).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })
+                      : "—")}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700">Last updated</dt>
+                <dd className="text-gray-900 mt-0.5">
+                  {selectedUserDetail.updated_at
+                    ? new Date(selectedUserDetail.updated_at).toLocaleString(undefined, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-gray-700 mb-1">Interests</dt>
+                <dd className="text-gray-900">
+                  {userDetailInterestsLoading ? (
+                    <span className="text-muted-foreground">Loading…</span>
+                  ) : userDetailInterests.length > 0 ? (
+                    <ul className="flex flex-wrap gap-1.5">
+                      {userDetailInterests.map((name) => (
+                        <li
+                          key={name}
+                          className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded text-xs border border-blue-100"
+                        >
+                          {name}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-muted-foreground">None</span>
+                  )}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t pt-4">
+              <button
+                type="button"
+                onClick={closeUserDetail}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm order-2 sm:order-1"
+              >
+                Close
+              </button>
+              <div className="flex flex-wrap gap-2 order-1 sm:order-2">
+                {selectedUserDetail.status === "active" ? (
+                  <button
+                    type="button"
+                    onClick={() => handleUserAction(selectedUserDetail.id, "suspend")}
+                    className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+                  >
+                    Suspend
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleUserAction(selectedUserDetail.id, "unsuspend")}
+                    className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  >
+                    Unsuspend
+                  </button>
+                )}
+                {selectedUserDetail.role === "expert" && (
+                  <button
+                    type="button"
+                    onClick={() => handleRevokeExpert(selectedUserDetail.id)}
+                    className="px-4 py-2 text-sm border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50"
+                  >
+                    Revoke Expert
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Content moderation: article preview (no navigation away from dashboard) */}
+      {previewArticleId && (
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={closeArticlePreview}
+          role="presentation"
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-article-preview-title"
+          >
+            <div className="shrink-0 px-6 pt-6 pb-4 flex items-start justify-between gap-4 border-b border-gray-100">
+              <h2 id="admin-article-preview-title" className="text-xl font-semibold">
+                Article preview
+              </h2>
+              <button
+                type="button"
+                onClick={closeArticlePreview}
+                className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50 shrink-0"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+              {previewArticleLoading && (
+                <p className="text-sm text-muted-foreground py-8 text-center">Loading article…</p>
+              )}
+              {previewArticleError && !previewArticleLoading && (
+                <p className="text-sm text-red-600 py-4">{previewArticleError}</p>
+              )}
+
+              {previewArticle && !previewArticleLoading && (
+                <div className="space-y-4 text-sm">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span
+                      className={`px-2 py-1 rounded font-medium ${
+                        previewArticle.status === "published"
+                          ? "bg-green-100 text-green-800"
+                          : previewArticle.status === "flagged"
+                            ? "bg-red-100 text-red-800"
+                            : "bg-orange-100 text-orange-800"
+                      }`}
+                    >
+                      {previewArticle.status}
+                    </span>
+                    {previewArticle.category?.name && (
+                      <span className="text-muted-foreground">{previewArticle.category.name}</span>
+                    )}
+                  </div>
+                  <h3 className="text-2xl font-semibold text-gray-900">{previewArticle.title}</h3>
+                  <p className="text-muted-foreground">
+                    By {previewArticle.author_display_name ?? "Unknown author"}
+                    {previewArticle.tags?.length ? (
+                      <span className="block mt-1 text-xs">
+                        Tags: {previewArticle.tags.join(", ")}
+                      </span>
+                    ) : null}
+                  </p>
+                  {previewArticle.excerpt?.trim() && (
+                    <p className="text-gray-700 border-l-4 border-gray-200 pl-3 italic">
+                      {previewArticle.excerpt}
+                    </p>
+                  )}
+                  {previewArticle.image_url && (
+                    <div className="rounded-lg overflow-hidden border">
+                      <img
+                        src={previewArticle.image_url}
+                        alt={previewArticle.title}
+                        className="w-full max-h-64 object-cover"
+                      />
+                    </div>
+                  )}
+                  {previewArticle.status === "rejected" && previewArticle.rejection_reason?.trim() && (
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-900">
+                      <span className="font-semibold">Rejection reason: </span>
+                      {previewArticle.rejection_reason}
+                    </div>
+                  )}
+                  <div
+                    className="prose prose-sm sm:prose-base max-w-none text-gray-900"
+                    dangerouslySetInnerHTML={{ __html: previewArticle.content || "" }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {previewArticle && !previewArticleLoading && (
+              <div className="shrink-0 border-t px-6 py-3 flex flex-wrap gap-2 bg-gray-50">
+                {previewArticle.status === "flagged" ? (
+                  <button
+                    type="button"
+                    onClick={() => handleArticleAction(previewArticle.id, "unsuspend")}
+                    className="px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    Unsuspend
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleArticleAction(previewArticle.id, "suspend")}
+                    className="px-3 py-1.5 text-xs bg-orange-600 text-white rounded hover:bg-orange-700"
+                  >
+                    Suspend
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleArticleAction(previewArticle.id, "delete")}
+                  className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700"
+                >
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Expert application detail modal */}
       {selectedExpert && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1332,38 +1684,44 @@ export function AdminDashboard() {
               </div>
             </dl>
 
-            <div className="mt-6 flex justify-between gap-3">
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
               <button
                 type="button"
                 onClick={() => setSelectedExpert(null)}
-                className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm"
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm order-2 sm:order-1"
               >
                 Close
               </button>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!selectedExpert) return;
-                    handleExpertAction(selectedExpert.id, "reject");
-                    setSelectedExpert(null);
-                  }}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
-                >
-                  Reject
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!selectedExpert) return;
-                    handleExpertAction(selectedExpert.id, "approve");
-                    setSelectedExpert(null);
-                  }}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-                >
-                  Approve
-                </button>
-              </div>
+              {selectedExpert.status === "pending" ? (
+                <div className="flex gap-2 order-1 sm:order-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!selectedExpert) return;
+                      const ok = await handleExpertAction(selectedExpert.id, "reject");
+                      if (ok) setSelectedExpert(null);
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!selectedExpert) return;
+                      const ok = await handleExpertAction(selectedExpert.id, "approve");
+                      if (ok) setSelectedExpert(null);
+                    }}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                  >
+                    Approve
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground order-1 sm:order-2">
+                  This application was already reviewed. Approve and reject are not available.
+                </p>
+              )}
             </div>
           </div>
         </div>
