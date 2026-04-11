@@ -173,6 +173,8 @@ export interface Database {
           source_ai_verdict: string | null;
           source_check_reason: string | null;
           source_references: unknown | null;
+          expert_display_name: string | null;
+          expert_avatar: string | null;
         };
         Insert: {
           id?: string;
@@ -191,6 +193,8 @@ export interface Database {
           source_ai_verdict?: string | null;
           source_check_reason?: string | null;
           source_references?: unknown | null;
+          expert_display_name?: string | null;
+          expert_avatar?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["expert_reviews"]["Insert"]>;
       };

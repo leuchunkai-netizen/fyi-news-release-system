@@ -1,12 +1,24 @@
 import { useState, useEffect } from "react";
-import { CheckCircle, XCircle, AlertTriangle, Eye, Star, Plus, Trash2 } from "lucide-react";
+import { Link } from "react-router";
+import { CheckCircle, XCircle, AlertTriangle, Eye, Star, Plus, Trash2, Pencil, ExternalLink } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import {
   getExpertDashboardArticles,
+  getMyExpertReviewForArticle,
   submitExpertReview,
+  withdrawExpertReview,
+  expertReviewStoredVerifications,
   type ExpertDashboardArticle,
   type ExpertReviewSourceVerification,
 } from "../../lib/api/articles";
+import type { ExpertReviewRow } from "../../lib/types/database";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "../components/ui/dialog";
 import { verifyClaimSource } from "../../lib/api/factcheck";
 import {
   MAX_EXPERT_SOURCE_URLS,
@@ -30,7 +42,7 @@ function claimForSourcePrecheck(article: ExpertDashboardArticle, comments: strin
 export function ExpertDashboard() {
   const { user } = useUser();
   const [articles, setArticles] = useState<ExpertDashboardArticle[]>([]);
-  const [listFilter, setListFilter] = useState<"all" | "needs_review">("all");
+  const [listFilter, setListFilter] = useState<"all" | "needs_review" | "reviewed">("all");
   const [loading, setLoading] = useState(true);
   const [selectedArticle, setSelectedArticle] = useState<string | null>(null);
   const [reviewData, setReviewData] = useState({
@@ -52,6 +64,11 @@ export function ExpertDashboard() {
   } | null>(null);
   const [reviewSourceCheckBusy, setReviewSourceCheckBusy] = useState(false);
   const [reviewSourceCheckNote, setReviewSourceCheckNote] = useState<string | null>(null);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewReviewLoading, setViewReviewLoading] = useState(false);
+  const [viewReview, setViewReview] = useState<ExpertReviewRow | null>(null);
+  const [viewArticleTitle, setViewArticleTitle] = useState("");
+  const [deletingArticleId, setDeletingArticleId] = useState<string | null>(null);
 
   const loadArticles = () => {
     if (!user || user.role !== "expert") return;
@@ -67,11 +84,6 @@ export function ExpertDashboard() {
   }, [user?.id]);
 
   useEffect(() => {
-    setReviewSourcePrecheck(null);
-    setReviewSourceCheckNote(null);
-  }, [selectedArticle]);
-
-  useEffect(() => {
     if (!reviewSourcePrecheck) return;
     if (
       sourceUrlInputsFingerprint(reviewData.sourceUrls) !== reviewSourcePrecheck.urlsKey ||
@@ -85,7 +97,94 @@ export function ExpertDashboard() {
   const visibleArticles =
     listFilter === "needs_review"
       ? articles.filter((a) => a.myReviewDecision !== "approved")
-      : articles;
+      : listFilter === "reviewed"
+        ? articles.filter((a) => a.myReviewDecision != null)
+        : articles;
+
+  function starRatingFromStored(rating: number | null): number {
+    const r = rating ?? 0;
+    if (r > 0 && r <= 5) return r;
+    return Math.min(5, Math.max(0, Math.round(r / 20)));
+  }
+
+  const openViewReview = async (article: ExpertDashboardArticle) => {
+    if (!user) return;
+    setViewArticleTitle(article.title);
+    setViewDialogOpen(true);
+    setViewReviewLoading(true);
+    setViewReview(null);
+    try {
+      const rev = await getMyExpertReviewForArticle(article.id, user.id);
+      setViewReview(rev);
+    } catch {
+      setViewReview(null);
+    } finally {
+      setViewReviewLoading(false);
+    }
+  };
+
+  const openEditReview = async (article: ExpertDashboardArticle) => {
+    if (!user) return;
+    try {
+      const rev = await getMyExpertReviewForArticle(article.id, user.id);
+      if (!rev) {
+        alert("Could not load your review.");
+        return;
+      }
+      const verifications = expertReviewStoredVerifications(rev);
+      const sourceUrls =
+        verifications.length > 0 ? verifications.map((v) => v.url) : rev.source_url ? [rev.source_url] : [""];
+      setReviewData({
+        rating: starRatingFromStored(rev.rating),
+        credibilityScore: rev.credibility_score,
+        factualAccuracy: rev.factual_accuracy ?? 0,
+        comments: rev.comments ?? "",
+        sourceUrls,
+        flagged: rev.flagged,
+      });
+      const snapComments = (rev.comments ?? "").trim();
+      if (verifications.length > 0) {
+        setReviewSourcePrecheck({
+          articleId: article.id,
+          urlsKey: sourceUrlInputsFingerprint(sourceUrls),
+          commentsSnapshot: snapComments,
+          verifications,
+        });
+        setReviewSourceCheckNote(
+          "Loaded your saved sources. If you change comments or URLs, click Check all sources again before submitting.",
+        );
+      } else {
+        setReviewSourcePrecheck(null);
+        setReviewSourceCheckNote(null);
+      }
+      setSelectedArticle(article.id);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not load your review.");
+    }
+  };
+
+  const handleDeleteReview = async (article: ExpertDashboardArticle) => {
+    if (!user) return;
+    const detail =
+      article.myReviewDecision === "approved"
+        ? "The article will stay published but will no longer show as expert-verified."
+        : "The article will return to the pending queue for another review.";
+    if (!window.confirm(`Remove your expert review for this article?\n\n${detail}`)) return;
+    setDeletingArticleId(article.id);
+    try {
+      await withdrawExpertReview(article.id, user.id);
+      if (selectedArticle === article.id) {
+        setSelectedArticle(null);
+        setReviewData(emptyReview());
+        clearReviewSourceCheck();
+      }
+      loadArticles();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not remove review.");
+    } finally {
+      setDeletingArticleId(null);
+    }
+  };
 
   if (!user || user.role !== "expert") {
     return (
@@ -200,6 +299,8 @@ export function ExpertDashboard() {
         comments: reviewData.comments.trim() || null,
         flagged: reviewData.flagged,
         sourceVerifications: reviewSourcePrecheck!.verifications,
+        expertDisplayName: user.name,
+        expertAvatar: user.avatar ?? null,
       });
       setSelectedArticle(null);
       setReviewData(emptyReview());
@@ -229,6 +330,8 @@ export function ExpertDashboard() {
         comments: reviewData.comments.trim(),
         flagged: reviewData.flagged,
         sourceVerifications: reviewSourcePrecheck!.verifications,
+        expertDisplayName: user.name,
+        expertAvatar: user.avatar ?? null,
       });
       setSelectedArticle(null);
       setReviewData(emptyReview());
@@ -274,6 +377,13 @@ export function ExpertDashboard() {
           >
             Not yet approved by you (
             {articles.filter((a) => a.myReviewDecision !== "approved").length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setListFilter("reviewed")}
+            className={`px-3 py-1.5 rounded-lg text-sm border ${listFilter === "reviewed" ? "bg-red-600 text-white border-red-600" : "bg-white hover:bg-gray-50"}`}
+          >
+            My reviews ({articles.filter((a) => a.myReviewDecision != null).length})
           </button>
         </div>
 
@@ -330,27 +440,82 @@ export function ExpertDashboard() {
                             {article.myReviewDecision == null && (
                               <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700">No review from you yet</span>
                             )}
+                            {article.status === "rejected" && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-800">Article rejected</span>
+                            )}
                           </div>
                           <div className="flex items-center gap-3 text-sm text-muted-foreground mb-2">
                             <span className="px-2 py-1 bg-gray-100 rounded text-xs">
                               {article.category?.name ?? "Uncategorized"}
                             </span>
                             <span>By {article.author_display_name ?? "Unknown"}</span>
-                            <span>• Published {formatDate(article.published_at ?? article.submitted_at ?? article.created_at)}</span>
+                            <span>
+                              •{" "}
+                              {article.status === "rejected"
+                                ? `Rejected ${formatDate(article.updated_at ?? article.submitted_at ?? article.created_at)}`
+                                : `Published ${formatDate(article.published_at ?? article.submitted_at ?? article.created_at)}`}
+                            </span>
                           </div>
                           <p className="text-sm text-muted-foreground">{article.excerpt ?? ""}</p>
                         </div>
                       </div>
 
-                      <div className="flex gap-2 mt-4">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedArticle(selectedArticle === article.id ? null : article.id)}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                      <div className="flex flex-wrap gap-2 mt-4">
+                        <Link
+                          to={`/article/${article.id}`}
+                          className="px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 flex items-center gap-2 text-sm font-medium text-slate-800"
                         >
-                          <Eye className="w-4 h-4" />
-                          {selectedArticle === article.id ? "Hide Review Form" : "Review Article"}
-                        </button>
+                          <ExternalLink className="w-4 h-4" />
+                          View article
+                        </Link>
+                        {article.myReviewDecision != null ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openViewReview(article)}
+                              className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 flex items-center gap-2 text-sm"
+                            >
+                              <Eye className="w-4 h-4" />
+                              View review
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openEditReview(article)}
+                              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm"
+                            >
+                              <Pencil className="w-4 h-4" />
+                              Edit review
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingArticleId === article.id}
+                              onClick={() => handleDeleteReview(article)}
+                              className="px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 flex items-center gap-2 text-sm disabled:opacity-50"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              {deletingArticleId === article.id ? "Removing…" : "Delete review"}
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (selectedArticle === article.id) {
+                                setSelectedArticle(null);
+                                clearReviewSourceCheck();
+                                setReviewData(emptyReview());
+                              } else {
+                                clearReviewSourceCheck();
+                                setReviewData(emptyReview());
+                                setSelectedArticle(article.id);
+                              }
+                            }}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm"
+                          >
+                            <Eye className="w-4 h-4" />
+                            {selectedArticle === article.id ? "Hide review form" : "Review article"}
+                          </button>
+                        )}
                       </div>
 
                       {selectedArticle === article.id && (
@@ -525,6 +690,86 @@ export function ExpertDashboard() {
           )}
         </div>
       </div>
+
+      <Dialog
+        open={viewDialogOpen}
+        onOpenChange={(open) => {
+          setViewDialogOpen(open);
+          if (!open) {
+            setViewReview(null);
+            setViewArticleTitle("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Your review</DialogTitle>
+            <DialogDescription className="line-clamp-3">{viewArticleTitle}</DialogDescription>
+          </DialogHeader>
+          {viewReviewLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : viewReview ? (
+            <div className="space-y-4 text-sm">
+              <div className="flex flex-wrap gap-2 items-center">
+                <span
+                  className={`text-xs font-semibold uppercase px-2 py-0.5 rounded ${
+                    viewReview.decision === "approved" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                  }`}
+                >
+                  {viewReview.decision}
+                </span>
+                {viewReview.flagged ? (
+                  <span className="text-xs font-medium text-orange-800 bg-orange-50 px-2 py-0.5 rounded">Flagged</span>
+                ) : null}
+                <span className="text-xs text-muted-foreground">
+                  {formatDate(viewReview.reviewed_at)}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                <p>
+                  Credibility: <strong className="text-slate-900">{viewReview.credibility_score}</strong>
+                </p>
+                {viewReview.factual_accuracy != null ? (
+                  <p>
+                    Factual accuracy: <strong className="text-slate-900">{viewReview.factual_accuracy}</strong>
+                  </p>
+                ) : null}
+                {viewReview.rating != null ? (
+                  <p>
+                    Rating: <strong className="text-slate-900">{starRatingFromStored(viewReview.rating)}</strong> / 5
+                  </p>
+                ) : null}
+              </div>
+              {viewReview.comments?.trim() ? (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Comments</p>
+                  <p className="text-slate-800 whitespace-pre-wrap">{viewReview.comments}</p>
+                </div>
+              ) : null}
+              {expertReviewStoredVerifications(viewReview).length > 0 ? (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Sources</p>
+                  <ul className="space-y-2">
+                    {expertReviewStoredVerifications(viewReview).map((s, i) => (
+                      <li key={i} className="border rounded-lg p-2 text-xs break-all">
+                        <a href={s.url} className="text-red-600 hover:underline font-medium" target="_blank" rel="noopener noreferrer">
+                          {s.sourceTitle || s.url}
+                        </a>
+                        <p className="text-muted-foreground mt-1">
+                          {s.sourceCredibility} · {s.aiVerdict}
+                        </p>
+                        {s.reason ? <p className="mt-1">{s.reason}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Could not load this review.</p>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

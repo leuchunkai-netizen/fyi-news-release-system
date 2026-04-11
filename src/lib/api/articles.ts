@@ -328,6 +328,37 @@ export async function getMyExpertReviewForArticle(
   return data as ExpertReviewRow | null;
 }
 
+/**
+ * The published expert review all readers should see (approved decision on a published article).
+ * Prefer the row for `articles.expert_reviewer_id` when set; otherwise the latest approved review.
+ */
+export async function getPublishedExpertReviewForArticle(
+  articleId: string,
+  expertReviewerId: string | null | undefined
+): Promise<ExpertReviewRow | null> {
+  if (expertReviewerId) {
+    const { data, error } = await supabase
+      .from("expert_reviews")
+      .select("*")
+      .eq("article_id", articleId)
+      .eq("expert_id", expertReviewerId)
+      .eq("decision", "approved")
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return data as ExpertReviewRow;
+  }
+  const { data, error } = await supabase
+    .from("expert_reviews")
+    .select("*")
+    .eq("article_id", articleId)
+    .eq("decision", "approved")
+    .order("reviewed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data as ExpertReviewRow | null;
+}
+
 /** True when credentials are not real applicant text (e.g. admin back-fill). */
 function isPlaceholderExpertCredentials(raw: string | null | undefined): boolean {
   const s = raw?.trim() ?? "";
@@ -371,33 +402,70 @@ export type ExpertDashboardArticle = {
   excerpt: string | null;
   author_display_name: string | null;
   created_at: string;
+  updated_at: string;
   submitted_at: string | null;
   published_at: string | null;
   image_url: string | null;
   category: { name: string } | null;
+  status: ArticleStatus;
   /** This expert's latest recorded decision for this article, if any */
   myReviewDecision: "approved" | "rejected" | null;
 };
 
+const expertDashboardArticleSelect =
+  "id, status, title, excerpt, author_display_name, created_at, updated_at, submitted_at, published_at, image_url, category:categories(name)";
+
 /**
- * Published articles in this expert's approved expertise categories only (newest first).
+ * Published articles in this expert's categories, plus rejected articles this expert reviewed (so they can edit/delete).
  * Includes `myReviewDecision` when this expert has already submitted a review.
- * Returns [] when the expert has no matching approved categories.
  */
 export async function getExpertDashboardArticles(expertId: string, limit = 200): Promise<ExpertDashboardArticle[]> {
   const categoryIds = await getExpertApprovedCategoryIds(expertId);
-  if (categoryIds.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from("articles")
-    .select("id, title, excerpt, author_display_name, created_at, submitted_at, published_at, image_url, category:categories(name)")
-    .eq("status", "published")
-    .in("category_id", categoryIds)
-    .order("published_at", { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  const rows = (data ?? []) as Omit<ExpertDashboardArticle, "myReviewDecision">[];
-  if (rows.length === 0) return [];
+  const { data: rejectedReviewRows, error: rejRevErr } = await supabase
+    .from("expert_reviews")
+    .select("article_id")
+    .eq("expert_id", expertId)
+    .eq("decision", "rejected");
+  if (rejRevErr) throw rejRevErr;
+  const rejectedArticleIds = Array.from(
+    new Set((rejectedReviewRows ?? []).map((r: { article_id: string }) => r.article_id)),
+  );
+
+  type Row = Omit<ExpertDashboardArticle, "myReviewDecision">;
+  const byId = new Map<string, Row>();
+
+  if (categoryIds.length > 0) {
+    const { data: pub, error } = await supabase
+      .from("articles")
+      .select(expertDashboardArticleSelect)
+      .eq("status", "published")
+      .in("category_id", categoryIds)
+      .order("published_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    for (const r of (pub ?? []) as Row[]) byId.set(r.id, r);
+  }
+
+  if (rejectedArticleIds.length > 0) {
+    const { data: rejArticles, error: rejArtErr } = await supabase
+      .from("articles")
+      .select(expertDashboardArticleSelect)
+      .eq("status", "rejected")
+      .in("id", rejectedArticleIds);
+    if (rejArtErr) throw rejArtErr;
+    for (const r of (rejArticles ?? []) as Row[]) {
+      if (!byId.has(r.id)) byId.set(r.id, r);
+    }
+  }
+
+  if (byId.size === 0) return [];
+
+  const rows = Array.from(byId.values()).sort((a, b) => {
+    const ta = new Date(a.published_at ?? a.submitted_at ?? a.created_at).getTime();
+    const tb = new Date(b.published_at ?? b.submitted_at ?? b.created_at).getTime();
+    return tb - ta;
+  });
 
   const ids = rows.map((r) => r.id);
   const { data: reviews, error: revErr } = await supabase
@@ -433,6 +501,39 @@ export type ExpertReviewSourceVerification = {
   reason: string;
 };
 
+/** Rebuild verification list from a stored expert_reviews row (for edit / precheck seeding). */
+export function expertReviewStoredVerifications(review: ExpertReviewRow): ExpertReviewSourceVerification[] {
+  const refs = review.source_references;
+  if (Array.isArray(refs) && refs.length > 0) {
+    const out: ExpertReviewSourceVerification[] = [];
+    for (const x of refs) {
+      if (x && typeof x === "object" && "url" in x && typeof (x as { url: unknown }).url === "string") {
+        const o = x as Record<string, unknown>;
+        out.push({
+          url: String(o.url),
+          sourceTitle: typeof o.sourceTitle === "string" ? o.sourceTitle : "",
+          sourceCredibility: typeof o.sourceCredibility === "string" ? o.sourceCredibility : "—",
+          aiVerdict: typeof o.aiVerdict === "string" ? o.aiVerdict : "—",
+          reason: typeof o.reason === "string" ? o.reason : "",
+        });
+      }
+    }
+    if (out.length > 0) return out;
+  }
+  if (review.source_url) {
+    return [
+      {
+        url: review.source_url,
+        sourceTitle: review.source_title ?? "",
+        sourceCredibility: review.source_credibility ?? "—",
+        aiVerdict: review.source_ai_verdict ?? "—",
+        reason: review.source_check_reason ?? "",
+      },
+    ];
+  }
+  return [];
+}
+
 /** Submit expert review: insert expert_reviews and update article status. */
 export async function submitExpertReview(
   articleId: string,
@@ -446,6 +547,9 @@ export async function submitExpertReview(
     flagged?: boolean;
     /** One or more verified sources (same shape as comments). */
     sourceVerifications?: ExpertReviewSourceVerification[] | null;
+    /** Shown to all readers on the article page (stored on the review row). */
+    expertDisplayName?: string | null;
+    expertAvatar?: string | null;
   }
 ) {
   const list = params.sourceVerifications ?? [];
@@ -459,6 +563,8 @@ export async function submitExpertReview(
     flagged: params.flagged ?? false,
     decision: params.decision,
     reviewed_at: new Date().toISOString(),
+    expert_display_name: params.expertDisplayName?.trim() || null,
+    expert_avatar: params.expertAvatar?.trim() || null,
     ...(list.length > 0
       ? {
           source_url: list[0].url,
@@ -477,22 +583,82 @@ export async function submitExpertReview(
     onConflict: "article_id,expert_id",
   });
   if (reviewErr) throw reviewErr;
+
+  const { data: art, error: artFetchErr } = await supabase
+    .from("articles")
+    .select("status")
+    .eq("id", articleId)
+    .maybeSingle();
+  if (artFetchErr) throw artFetchErr;
+
   const updates =
     params.decision === "approved"
-      ? {
-          status: "published" as const,
-          credibility_score: params.credibilityScore,
-          is_verified: true,
-          expert_reviewer_id: expertId,
-          published_at: new Date().toISOString(),
-          rejection_reason: null,
-        }
+      ? art?.status === "published"
+        ? {
+            credibility_score: params.credibilityScore,
+            is_verified: true,
+            expert_reviewer_id: expertId,
+            rejection_reason: null,
+          }
+        : {
+            status: "published" as const,
+            credibility_score: params.credibilityScore,
+            is_verified: true,
+            expert_reviewer_id: expertId,
+            published_at: new Date().toISOString(),
+            rejection_reason: null,
+          }
       : {
           status: "rejected" as const,
           rejection_reason: params.comments ?? "Rejected by expert",
         };
   const { error: articleErr } = await supabase.from("articles").update(updates).eq("id", articleId);
   if (articleErr) throw articleErr;
+}
+
+/**
+ * Remove this expert's review row and fix article state: published → drop verification;
+ * rejected (by this expert) → return article to pending for another pass.
+ */
+export async function withdrawExpertReview(articleId: string, expertId: string): Promise<void> {
+  const review = await getMyExpertReviewForArticle(articleId, expertId);
+  if (!review) throw new Error("No review found to remove.");
+
+  const { data: article, error: aErr } = await supabase
+    .from("articles")
+    .select("status, expert_reviewer_id")
+    .eq("id", articleId)
+    .maybeSingle();
+  if (aErr) throw aErr;
+
+  if (review.decision === "approved" && article?.status === "published") {
+    const { error } = await supabase
+      .from("articles")
+      .update({
+        is_verified: false,
+        expert_reviewer_id: null,
+        credibility_score: null,
+      })
+      .eq("id", articleId)
+      .eq("expert_reviewer_id", expertId);
+    if (error) throw error;
+  } else if (review.decision === "rejected" && article?.status === "rejected") {
+    const { error } = await supabase
+      .from("articles")
+      .update({
+        status: "pending",
+        rejection_reason: null,
+      })
+      .eq("id", articleId);
+    if (error) throw error;
+  }
+
+  const { error: delErr } = await supabase
+    .from("expert_reviews")
+    .delete()
+    .eq("article_id", articleId)
+    .eq("expert_id", expertId);
+  if (delErr) throw delErr;
 }
 
 /** Featured articles (optional). */

@@ -5,8 +5,7 @@ import { useUser } from "../context/UserContext";
 import {
   getArticleById,
   getCredibilityAnalysis,
-  getApprovedExpertProfileLabel,
-  getMyExpertReviewForArticle,
+  getPublishedExpertReviewForArticle,
   getRelatedArticles,
   incrementArticleViews,
 } from "../../lib/api/articles";
@@ -161,9 +160,9 @@ export function ArticleDetailPage() {
   const [guestArticleLimitReached, setGuestArticleLimitReached] = useState(false);
   const [comments, setComments] = useState<CommentWithAuthor[]>([]);
   const [comment, setComment] = useState("");
-  const [myExpertReview, setMyExpertReview] = useState<ExpertReviewRow | null>(null);
-  const [myExpertReviewLoading, setMyExpertReviewLoading] = useState(false);
-  const [expertLabel, setExpertLabel] = useState<string | null>(null);
+  /** Approved expert review for this article — loaded for every reader when the article is expert-verified. */
+  const [publishedExpertReview, setPublishedExpertReview] = useState<ExpertReviewRow | null>(null);
+  const [publishedExpertReviewLoading, setPublishedExpertReviewLoading] = useState(false);
   const [showAISummary, setShowAISummary] = useState(false);
   const [aiSummary, setAiSummary] = useState<ArticleSummaryResult | null>(null);
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
@@ -264,34 +263,27 @@ export function ArticleDetailPage() {
   }, [id, user?.id]);
 
   useEffect(() => {
-    if (!id || !user || user.role !== "expert") {
-      setMyExpertReview(null);
-      setExpertLabel(null);
-      setMyExpertReviewLoading(false);
+    if (!id || !article || article.id !== id || article.status !== "published" || !article.is_verified) {
+      setPublishedExpertReview(null);
+      setPublishedExpertReviewLoading(false);
       return;
     }
     let cancelled = false;
-    setMyExpertReviewLoading(true);
-    Promise.all([getMyExpertReviewForArticle(id, user.id), getApprovedExpertProfileLabel(user.id)])
-      .then(([review, label]) => {
-        if (!cancelled) {
-          setMyExpertReview(review);
-          setExpertLabel(label);
-        }
+    setPublishedExpertReviewLoading(true);
+    getPublishedExpertReviewForArticle(id, article.expert_reviewer_id)
+      .then((row) => {
+        if (!cancelled) setPublishedExpertReview(row);
       })
       .catch(() => {
-        if (!cancelled) {
-          setMyExpertReview(null);
-          setExpertLabel(null);
-        }
+        if (!cancelled) setPublishedExpertReview(null);
       })
       .finally(() => {
-        if (!cancelled) setMyExpertReviewLoading(false);
+        if (!cancelled) setPublishedExpertReviewLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [id, user?.id, user?.role]);
+  }, [id, article?.id, article?.status, article?.is_verified, article?.expert_reviewer_id]);
 
   useEffect(() => {
     setShowAISummary(false);
@@ -567,8 +559,11 @@ export function ArticleDetailPage() {
       ? buildSampleRejectionFindings(article.content ?? "", concerns, warnings)
       : [];
 
-  const myExpertReviewSources =
-    myExpertReview && user?.role === "expert" ? displaySourcesForExpertReview(myExpertReview) : [];
+  const publishedExpertReviewSources = publishedExpertReview
+    ? displaySourcesForExpertReview(publishedExpertReview)
+    : [];
+  const publishedReviewerName =
+    publishedExpertReview?.expert_display_name?.trim() || "Verified expert";
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -957,100 +952,105 @@ export function ArticleDetailPage() {
           </div>
         )}
 
-        {user?.role === "expert" ? (
-          <div className="mb-10 rounded-xl border border-slate-200 bg-slate-50/80 p-6">
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-red-600 shrink-0" />
-              Your expert review
-            </h2>
-            {myExpertReviewLoading ? (
-              <p className="text-sm text-muted-foreground">Loading your review…</p>
-            ) : myExpertReview ? (
-              <div className="flex gap-4">
-                <UserAvatar avatar={user.avatar} name={user.name} size="md" className="flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="font-semibold">{user.name}</span>
-                    {expertLabel ? (
+        {article.status === "published" && article.is_verified && (
+            <div className="mb-10 rounded-xl border border-slate-200 bg-slate-50/80 p-6">
+              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 flex-wrap">
+                <Sparkles className="w-5 h-5 text-red-600 shrink-0" />
+                Expert review
+                {user?.id && publishedExpertReview && user.id === publishedExpertReview.expert_id ? (
+                  <span className="text-sm font-normal text-muted-foreground">(your review)</span>
+                ) : null}
+              </h2>
+              {publishedExpertReviewLoading ? (
+                <p className="text-sm text-muted-foreground">Loading expert review…</p>
+              ) : publishedExpertReview ? (
+                <div className="flex gap-4">
+                  <UserAvatar
+                    avatar={publishedExpertReview.expert_avatar}
+                    name={publishedReviewerName}
+                    size="md"
+                    className="flex-shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <span className="font-semibold">{publishedReviewerName}</span>
                       <span className="text-sm font-medium text-red-900 bg-red-50 border border-red-100 rounded-full px-2.5 py-0.5">
-                        {expertLabel}
+                        Verified expert
                       </span>
-                    ) : null}
-                    <span
-                      className={`text-xs font-semibold uppercase px-2 py-0.5 rounded ${
-                        myExpertReview.decision === "approved" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {myExpertReview.decision}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-3">{formatTimeAgo(myExpertReview.reviewed_at)}</p>
-                  {myExpertReview.comments?.trim() ? (
-                    <p className="text-sm text-slate-800 whitespace-pre-wrap mb-4">{myExpertReview.comments}</p>
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic mb-4">No written comments in your review.</p>
-                  )}
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-4">
-                    <span>
-                      Credibility score:{" "}
-                      <strong className="text-slate-900">{myExpertReview.credibility_score}</strong>
-                    </span>
-                    {myExpertReview.factual_accuracy != null ? (
-                      <span>
-                        Factual accuracy:{" "}
-                        <strong className="text-slate-900">{myExpertReview.factual_accuracy}</strong>
+                      <span
+                        className={`text-xs font-semibold uppercase px-2 py-0.5 rounded ${
+                          publishedExpertReview.decision === "approved"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                        }`}
+                      >
+                        {publishedExpertReview.decision}
                       </span>
-                    ) : null}
-                    {myExpertReview.rating != null ? (
-                      <span>
-                        Rating: <strong className="text-slate-900">{myExpertReview.rating}</strong>
-                      </span>
-                    ) : null}
-                  </div>
-                  {myExpertReviewSources.length > 0 ? (
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Source{myExpertReviewSources.length > 1 ? "s" : ""}
-                      </p>
-                      {myExpertReviewSources.map((src, idx) => (
-                        <div
-                          key={`expert-review-src-${idx}`}
-                          className="text-xs border rounded-lg px-3 py-2 bg-white text-slate-700 space-y-1 font-mono"
-                        >
-                          <p>
-                            <a
-                              href={src.url}
-                              className="text-red-600 hover:underline break-all font-sans font-medium"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              {src.sourceTitle || src.url}
-                            </a>
-                          </p>
-                          <p className="font-sans">
-                            Credibility: <span className="font-medium">{src.sourceCredibility ?? "—"}</span>
-                            {" · "}
-                            Check: <span className="font-medium">{src.aiVerdict ?? "—"}</span>
-                          </p>
-                          {src.reason ? (
-                            <p className="text-muted-foreground font-sans pt-1">{src.reason}</p>
-                          ) : null}
-                        </div>
-                      ))}
                     </div>
-                  ) : null}
+                    <p className="text-xs text-muted-foreground mb-3">{formatTimeAgo(publishedExpertReview.reviewed_at)}</p>
+                    {publishedExpertReview.comments?.trim() ? (
+                      <p className="text-sm text-slate-800 whitespace-pre-wrap mb-4">{publishedExpertReview.comments}</p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic mb-4">No written comments for this review.</p>
+                    )}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-4">
+                      <span>
+                        Credibility score:{" "}
+                        <strong className="text-slate-900">{publishedExpertReview.credibility_score}</strong>
+                      </span>
+                      {publishedExpertReview.factual_accuracy != null ? (
+                        <span>
+                          Factual accuracy:{" "}
+                          <strong className="text-slate-900">{publishedExpertReview.factual_accuracy}</strong>
+                        </span>
+                      ) : null}
+                      {publishedExpertReview.rating != null ? (
+                        <span>
+                          Rating: <strong className="text-slate-900">{publishedExpertReview.rating}</strong>
+                        </span>
+                      ) : null}
+                    </div>
+                    {publishedExpertReviewSources.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Source{publishedExpertReviewSources.length > 1 ? "s" : ""}
+                        </p>
+                        {publishedExpertReviewSources.map((src, idx) => (
+                          <div
+                            key={`expert-review-src-${idx}`}
+                            className="text-xs border rounded-lg px-3 py-2 bg-white text-slate-700 space-y-1 font-mono"
+                          >
+                            <p>
+                              <a
+                                href={src.url}
+                                className="text-red-600 hover:underline break-all font-sans font-medium"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                {src.sourceTitle || src.url}
+                              </a>
+                            </p>
+                            <p className="font-sans">
+                              Credibility: <span className="font-medium">{src.sourceCredibility ?? "—"}</span>
+                              {" · "}
+                              Check: <span className="font-medium">{src.aiVerdict ?? "—"}</span>
+                            </p>
+                            {src.reason ? (
+                              <p className="text-muted-foreground font-sans pt-1">{src.reason}</p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                You have not submitted an expert review for this article yet.{" "}
-                <Link to="/expert-dashboard" className="text-red-700 font-medium hover:underline">
-                  Open Expert Dashboard
-                </Link>
-              </p>
-            )}
-          </div>
-        ) : null}
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Expert verification is shown above, but the detailed review could not be loaded.
+                </p>
+              )}
+            </div>
+          )}
 
         <div>
           <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
