@@ -203,6 +203,13 @@ export function Header() {
                     </div>
                   </li>
                 )}
+                {user.role === "admin" && (
+                  <li>
+                    <Link to="/admin" className={`${navLinkClass("/admin")} font-semibold`}>
+                      Admin Dashboard
+                    </Link>
+                  </li>
+                )}
                 {canAuthorArticles(user.role) && (
                   <li>
                     <Link to="/my-articles" className={`${navLinkClass("/my-articles")} font-semibold`}>

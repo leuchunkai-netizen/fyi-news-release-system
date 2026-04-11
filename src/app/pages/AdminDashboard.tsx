@@ -1,4 +1,5 @@
 import { useId, useState, useEffect, useMemo } from "react";
+import { Link } from "react-router";
 import { Users, FileText, MessageSquare, Tag, Ban, Search, Plus, Edit, Trash2, Shield, LayoutDashboard } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { useGuestLanding, type IntroSlide, type VideoSection } from "../context/GuestLandingContext";
@@ -632,6 +633,12 @@ export function AdminDashboard() {
                     <td className="px-6 py-4 text-sm text-muted-foreground">{article.date}</td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2 flex-wrap">
+                        <Link
+                          to={`/article/${article.id}`}
+                          className="inline-flex items-center px-3 py-1 text-xs border border-slate-300 text-slate-800 rounded hover:bg-slate-50"
+                        >
+                          View article
+                        </Link>
                         {article.status === "flagged" ? (
                           <button
                             onClick={() => handleArticleAction(article.id, "unsuspend")}
