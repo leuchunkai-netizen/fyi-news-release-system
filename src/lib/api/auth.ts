@@ -29,8 +29,36 @@ export async function getCurrentUserProfile(): Promise<UserRow | null> {
   return data as UserRow | null;
 }
 
+/**
+ * Copy signup-time category picks from auth metadata into user_interests once the user has a session.
+ * Needed when email confirmation is on: signup cannot insert into user_interests without a session.
+ */
+export async function syncPendingSignupInterestsFromMetadata(): Promise<boolean> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) return false;
+  const raw = user.user_metadata?.signup_interests;
+  if (!Array.isArray(raw) || raw.length === 0) return false;
+  const names = raw.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+  if (names.length === 0) return false;
+  try {
+    const { setUserInterests } = await import("./userInterests");
+    await setUserInterests(user.id, names);
+    const { error } = await supabase.auth.updateUser({
+      data: { signup_interests: [] as string[] },
+    });
+    if (error) console.warn("[auth] Could not clear signup_interests metadata:", error.message);
+    return true;
+  } catch (e) {
+    console.warn("[auth] syncPendingSignupInterestsFromMetadata:", e);
+    return false;
+  }
+}
+
 /** Get current user profile plus interest names (for app context). */
 export async function getCurrentUserWithInterests(): Promise<{ profile: UserRow; interests: string[] } | null> {
+  await syncPendingSignupInterestsFromMetadata();
   const profile = await getCurrentUserProfile();
   if (!profile) return null;
   const { getUserInterestNames } = await import("./userInterests");
@@ -100,7 +128,10 @@ export async function signUp(
     email,
     password,
     options: {
-      data: { name },
+      data: {
+        name,
+        ...(options?.interests?.length ? { signup_interests: [...options.interests] } : {}),
+      },
       // Ensure Supabase/Resend email links redirect back into the SPA
       emailRedirectTo: redirectTo,
     },

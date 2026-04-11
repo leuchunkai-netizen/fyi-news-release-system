@@ -10,6 +10,7 @@ import { supabase } from "../../lib/supabase";
 import { UserAvatar } from "../components/UserAvatar";
 import { PROFILE_PHOTO_OPTIONS } from "../../lib/profilePhotos";
 import type { CategoryRow } from "../../lib/types/database";
+import { hasPremiumBenefits } from "../../lib/userRoles";
 
 export function ProfilePage() {
   const { user, setUser } = useUser();
@@ -549,8 +550,8 @@ export function ProfilePage() {
               </form>
             </div>
 
-            {/* Subscription Management - Premium Users */}
-            {user.role === "premium" && (
+            {/* Subscription Management - Premium & Expert (subscriber benefits) */}
+            {hasPremiumBenefits(user.role) && (
               <div className="border rounded-lg p-6">
                 <h2 className="text-xl font-semibold mb-6">Subscription Management</h2>
                 <div className="space-y-4">

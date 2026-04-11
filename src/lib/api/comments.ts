@@ -5,6 +5,15 @@ export interface CommentWithAuthor extends CommentRow {
   user?: { name: string; avatar: string | null } | null;
 }
 
+/** Stored when an expert comment passes verify-claim-source before insert. */
+export type CommentSourceVerification = {
+  url: string;
+  sourceTitle: string;
+  sourceCredibility: string;
+  aiVerdict: string;
+  reason: string;
+};
+
 /** Get comments for an article, enriching with user name/avatar when possible. Only active comments are returned; flagged comments are hidden. */
 export async function getComments(articleId: string): Promise<CommentWithAuthor[]> {
   // load only active comments so flagged ones stay hidden on article page
@@ -41,13 +50,40 @@ export async function getComments(articleId: string): Promise<CommentWithAuthor[
   }
 }
 
-/** Add comment (authenticated). */
-export async function addComment(articleId: string, userId: string, content: string): Promise<CommentRow> {
-  const { data, error } = await supabase
-    .from("comments")
-    .insert({ article_id: articleId, user_id: userId, content })
-    .select()
-    .single();
+/** Add comment (authenticated). One verification or several (one URL per line, all checked beforehand). */
+export async function addComment(
+  articleId: string,
+  userId: string,
+  content: string,
+  sourceVerification?: CommentSourceVerification | CommentSourceVerification[] | null
+): Promise<CommentRow> {
+  const base = {
+    article_id: articleId,
+    user_id: userId,
+    content,
+  };
+  const list =
+    sourceVerification == null
+      ? []
+      : Array.isArray(sourceVerification)
+        ? sourceVerification
+        : [sourceVerification];
+  const insert =
+    list.length === 0
+      ? base
+      : {
+          ...base,
+          source_url: list[0].url,
+          source_title: list.length > 1 ? `${list.length} sources` : list[0].sourceTitle,
+          source_credibility: list[0].sourceCredibility,
+          source_ai_verdict: list.every((s) => s.aiVerdict === "SUPPORT") ? "SUPPORT" : list[0].aiVerdict,
+          source_check_reason:
+            list.length > 1
+              ? `${list.length} links checked (all SUPPORT). First: ${list[0].reason}`
+              : list[0].reason,
+          source_references: list,
+        };
+  const { data, error } = await supabase.from("comments").insert(insert).select().single();
   if (error) throw error;
   return data as CommentRow;
 }

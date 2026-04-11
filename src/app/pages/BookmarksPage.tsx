@@ -7,6 +7,7 @@ import { getCategories } from "../../lib/api/categories";
 import type { ArticleRow } from "../../lib/types/database";
 import { previewTextFromArticle } from "../../lib/articlePreview";
 import type { CategoryRow } from "../../lib/types/database";
+import { hasPremiumBenefits } from "../../lib/userRoles";
 
 function formatTimeAgo(iso: string | null): string {
   if (!iso) return "";
@@ -28,7 +29,7 @@ export function BookmarksPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user || user.role !== "premium") {
+    if (!user || !hasPremiumBenefits(user.role)) {
       setLoading(false);
       return;
     }
@@ -58,12 +59,12 @@ export function BookmarksPage() {
     }
   };
 
-  if (!user || user.role !== "premium") {
+  if (!user || !hasPremiumBenefits(user.role)) {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-3xl font-semibold mb-4">Premium Feature</h1>
         <p className="text-muted-foreground mb-6">
-          Bookmarks are only available for Premium members.
+          Bookmarks are available for Premium and Expert members.
         </p>
         <Link
           to="/subscription"
@@ -118,6 +119,7 @@ export function BookmarksPage() {
                   views={article.views ?? 0}
                   credibilityScore={article.credibility_score ?? undefined}
                   isVerified={article.is_verified}
+                  hasAiCredibility={article.hasCredibilityAnalysis === true}
                 />
                 <button
                   type="button"

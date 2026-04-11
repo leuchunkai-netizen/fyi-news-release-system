@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import { useNavigate } from "react-router";
 import { useUser } from "../context/UserContext";
+import { hasPremiumBenefits } from "../../lib/userRoles";
 
 export function SubscriptionPage() {
   const { user } = useUser();
@@ -126,7 +127,7 @@ export function SubscriptionPage() {
             </li>
           </ul>
           {user ? (
-            user.role === "premium" ? (
+            hasPremiumBenefits(user.role) ? (
               <Link
                 to="/profile"
                 className="block w-full px-4 py-2 bg-gray-600 text-white text-center rounded-lg hover:bg-gray-700"
@@ -142,7 +143,7 @@ export function SubscriptionPage() {
               </Link>
             ) : (
               <span className="block w-full px-4 py-2 bg-gray-200 text-gray-600 text-center rounded-lg">
-                {user.role === "expert" ? "Expert account" : user.role === "admin" ? "Admin account" : "Current plan"}
+                {user.role === "admin" ? "Admin account" : "Current plan"}
               </span>
             )
           ) : (
@@ -183,7 +184,7 @@ export function SubscriptionPage() {
             </li>
           </ul>
           {user ? (
-            user.role === "premium" ? (
+            hasPremiumBenefits(user.role) ? (
               <Link
                 to="/profile"
                 className="block w-full px-4 py-2 bg-gray-600 text-white text-center rounded-lg hover:bg-gray-700"
@@ -199,7 +200,7 @@ export function SubscriptionPage() {
               </Link>
             ) : (
               <span className="block w-full px-4 py-2 bg-gray-200 text-gray-600 text-center rounded-lg">
-                {user.role === "expert" ? "Expert account" : user.role === "admin" ? "Admin account" : "Current plan"}
+                {user.role === "admin" ? "Admin account" : "Current plan"}
               </span>
             )
           ) : (

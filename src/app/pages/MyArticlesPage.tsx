@@ -4,6 +4,7 @@ import { Edit, Trash2, Eye, Clock, CheckCircle, XCircle } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { getMyArticles, deleteArticle } from "../../lib/api/articles";
 import type { ArticleWithCategory } from "../../lib/api/articles";
+import { canAuthorArticles } from "../../lib/userRoles";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "";
@@ -24,7 +25,7 @@ export function MyArticlesPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user?.id || (user.role !== "free" && user.role !== "premium")) return;
+    if (!user?.id || !canAuthorArticles(user.role)) return;
     setLoading(true);
     getMyArticles(user.id)
       .then(setArticles)
@@ -32,7 +33,7 @@ export function MyArticlesPage() {
       .finally(() => setLoading(false));
   }, [user?.id, user?.role, location.key]);
 
-  if (!user || (user.role !== "free" && user.role !== "premium")) {
+  if (!user || !canAuthorArticles(user.role)) {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-3xl font-semibold mb-4">Access Denied</h1>

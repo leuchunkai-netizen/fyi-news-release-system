@@ -8,6 +8,7 @@ import { createArticle, getArticleById, normalizeArticleTags, updateArticle } fr
 import { getCategories } from "../../lib/api/categories";
 import { uploadArticleImage } from "../../lib/storage";
 import type { CategoryRow } from "../../lib/types/database";
+import { canAuthorArticles } from "../../lib/userRoles";
 
 interface RejectionFinding {
   snippet: string;
@@ -138,7 +139,7 @@ export function UploadArticlePage() {
     };
   }, [isEditing, editingArticleId, user?.id]);
 
-  if (!user || (user.role !== "free" && user.role !== "premium")) {
+  if (!user || !canAuthorArticles(user.role)) {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
         <h1 className="text-3xl font-semibold mb-4">Access Denied</h1>

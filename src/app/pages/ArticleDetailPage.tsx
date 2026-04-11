@@ -2,14 +2,29 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
 import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Facebook, Twitter, Linkedin, AlertTriangle, Info, Eye, Trash2, Download } from "lucide-react";
 import { useUser } from "../context/UserContext";
-import { getArticleById, getCredibilityAnalysis, getRelatedArticles, incrementArticleViews } from "../../lib/api/articles";
+import {
+  getArticleById,
+  getCredibilityAnalysis,
+  getApprovedExpertProfileLabel,
+  getMyExpertReviewForArticle,
+  getRelatedArticles,
+  incrementArticleViews,
+} from "../../lib/api/articles";
 import { tryRecordPremiumArticleRead } from "../../lib/api/readHistory";
 import { downloadOfflineArticleFile } from "../../lib/downloadArticleHtml";
 import { fetchArticleSummary, type ArticleSummaryResult } from "../../lib/api/summary";
-import { getComments, addComment, deleteComment, reportComment } from "../../lib/api/comments";
+import {
+  getComments,
+  addComment,
+  deleteComment,
+  reportComment,
+  type CommentSourceVerification,
+  type CommentWithAuthor,
+} from "../../lib/api/comments";
 import { addBookmark, removeBookmark, isBookmarked } from "../../lib/api/bookmarks";
 import type { ArticleWithCategory } from "../../lib/api/articles";
-import type { CommentWithAuthor } from "../../lib/api/comments";
+import type { ExpertReviewRow } from "../../lib/types/database";
+import { hasPremiumBenefits } from "../../lib/userRoles";
 import { UserAvatar } from "../components/UserAvatar";
 import { RelatedRecommendationsGrid } from "../components/RelatedRecommendationsGrid";
 
@@ -75,6 +90,70 @@ function buildSampleRejectionFindings(content: string, concerns: string[], warni
   });
 }
 
+function displaySourcesForComment(c: CommentWithAuthor): CommentSourceVerification[] {
+  const refs = (c as { source_references?: unknown }).source_references;
+  if (Array.isArray(refs) && refs.length > 0) {
+    const out: CommentSourceVerification[] = [];
+    for (const x of refs) {
+      if (x && typeof x === "object" && "url" in x && typeof (x as { url: unknown }).url === "string") {
+        const o = x as Record<string, unknown>;
+        out.push({
+          url: String(o.url),
+          sourceTitle: typeof o.sourceTitle === "string" ? o.sourceTitle : "",
+          sourceCredibility: typeof o.sourceCredibility === "string" ? o.sourceCredibility : "—",
+          aiVerdict: typeof o.aiVerdict === "string" ? o.aiVerdict : "—",
+          reason: typeof o.reason === "string" ? o.reason : "",
+        });
+      }
+    }
+    if (out.length > 0) return out;
+  }
+  if (c.source_url) {
+    return [
+      {
+        url: c.source_url,
+        sourceTitle: c.source_title ?? "",
+        sourceCredibility: c.source_credibility ?? "—",
+        aiVerdict: c.source_ai_verdict ?? "—",
+        reason: c.source_check_reason ?? "",
+      },
+    ];
+  }
+  return [];
+}
+
+function displaySourcesForExpertReview(review: ExpertReviewRow): CommentSourceVerification[] {
+  const refs = review.source_references;
+  if (Array.isArray(refs) && refs.length > 0) {
+    const out: CommentSourceVerification[] = [];
+    for (const x of refs) {
+      if (x && typeof x === "object" && "url" in x && typeof (x as { url: unknown }).url === "string") {
+        const o = x as Record<string, unknown>;
+        out.push({
+          url: String(o.url),
+          sourceTitle: typeof o.sourceTitle === "string" ? o.sourceTitle : "",
+          sourceCredibility: typeof o.sourceCredibility === "string" ? o.sourceCredibility : "—",
+          aiVerdict: typeof o.aiVerdict === "string" ? o.aiVerdict : "—",
+          reason: typeof o.reason === "string" ? o.reason : "",
+        });
+      }
+    }
+    if (out.length > 0) return out;
+  }
+  if (review.source_url) {
+    return [
+      {
+        url: review.source_url,
+        sourceTitle: review.source_title ?? "",
+        sourceCredibility: review.source_credibility ?? "—",
+        aiVerdict: review.source_ai_verdict ?? "—",
+        reason: review.source_check_reason ?? "",
+      },
+    ];
+  }
+  return [];
+}
+
 export function ArticleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useUser();
@@ -82,6 +161,9 @@ export function ArticleDetailPage() {
   const [guestArticleLimitReached, setGuestArticleLimitReached] = useState(false);
   const [comments, setComments] = useState<CommentWithAuthor[]>([]);
   const [comment, setComment] = useState("");
+  const [myExpertReview, setMyExpertReview] = useState<ExpertReviewRow | null>(null);
+  const [myExpertReviewLoading, setMyExpertReviewLoading] = useState(false);
+  const [expertLabel, setExpertLabel] = useState<string | null>(null);
   const [showAISummary, setShowAISummary] = useState(false);
   const [aiSummary, setAiSummary] = useState<ArticleSummaryResult | null>(null);
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
@@ -182,6 +264,36 @@ export function ArticleDetailPage() {
   }, [id, user?.id]);
 
   useEffect(() => {
+    if (!id || !user || user.role !== "expert") {
+      setMyExpertReview(null);
+      setExpertLabel(null);
+      setMyExpertReviewLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setMyExpertReviewLoading(true);
+    Promise.all([getMyExpertReviewForArticle(id, user.id), getApprovedExpertProfileLabel(user.id)])
+      .then(([review, label]) => {
+        if (!cancelled) {
+          setMyExpertReview(review);
+          setExpertLabel(label);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMyExpertReview(null);
+          setExpertLabel(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMyExpertReviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, user?.id, user?.role]);
+
+  useEffect(() => {
     setShowAISummary(false);
     setAiSummary(null);
     setAiSummaryError(null);
@@ -245,22 +357,21 @@ export function ArticleDetailPage() {
   const handleCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !id || !comment.trim()) return;
-    // post comment, then refresh list from db so counts/order stay accurate
     setCommentSubmitting(true);
     try {
       await addComment(id, user.id, comment.trim());
       setComment("");
       const cmts = await getComments(id);
       setComments(cmts);
-    } catch {
-      // keep form state
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not post comment.");
     } finally {
       setCommentSubmitting(false);
     }
   };
 
   const handleBookmarkToggle = async () => {
-    if (!user || user.role !== "premium" || !id) return;
+    if (!user || !hasPremiumBenefits(user.role) || !id) return;
     // simple toggle flow: remove if saved, add if not
     try {
       if (bookmarked) {
@@ -422,6 +533,30 @@ export function ArticleDetailPage() {
   const strengths = hasDbAnalysis ? asStringArray(credibilityAnalysis.strengths) : [];
   const concerns = hasDbAnalysis ? asStringArray(credibilityAnalysis.concerns) : [];
   const warnings = hasDbAnalysis ? asStringArray(credibilityAnalysis.warnings) : [];
+
+  /** Show blue (expert) + green (AI) when both apply; otherwise one tick or Info. */
+  const credibilityScoreIcon =
+    hasDbAnalysis && article.is_verified ? (
+      <span className="inline-flex items-center gap-0.5 shrink-0" aria-label="Expert verified and AI fact-check">
+        <CheckCircle className="w-5 h-5 text-blue-600" aria-hidden />
+        <CheckCircle className="w-5 h-5 text-green-600" aria-hidden />
+      </span>
+    ) : hasDbAnalysis ? (
+      <CheckCircle className="w-5 h-5 shrink-0 text-green-600" aria-hidden />
+    ) : article.is_verified && expertScore != null ? (
+      <CheckCircle className="w-5 h-5 shrink-0 text-blue-600" aria-hidden />
+    ) : credibilityInfo ? (
+      <Info
+        className={`w-5 h-5 shrink-0 ${
+          credibilityInfo.color === "green"
+            ? "text-green-600"
+            : credibilityInfo.color === "yellow"
+              ? "text-yellow-600"
+              : "text-red-600"
+        }`}
+        aria-hidden
+      />
+    ) : null;
   const rejectionReasonSummary =
     article.status === "rejected"
       ? article.rejection_reason?.trim() ||
@@ -431,6 +566,9 @@ export function ArticleDetailPage() {
     article.status === "rejected"
       ? buildSampleRejectionFindings(article.content ?? "", concerns, warnings)
       : [];
+
+  const myExpertReviewSources =
+    myExpertReview && user?.role === "expert" ? displaySourcesForExpertReview(myExpertReview) : [];
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -456,7 +594,7 @@ export function ArticleDetailPage() {
             </Link>
             {article.is_verified && (
               <div className="flex items-center gap-1 text-blue-600">
-                <CheckCircle className="w-4 h-4" />
+                <CheckCircle className="w-4 h-4 shrink-0 text-blue-600" aria-hidden />
                 <span className="text-xs font-semibold">Expert verified</span>
               </div>
             )}
@@ -466,17 +604,19 @@ export function ArticleDetailPage() {
 
           {credibilityInfo && primaryScore != null && (
             <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border ${credibilityInfo.borderColor} ${credibilityInfo.bgColor} mb-4`}>
-              <Info className={`w-5 h-5 text-${credibilityInfo.color}-600`} />
+              {credibilityScoreIcon}
               <div>
                 <p className={`text-sm font-semibold ${credibilityInfo.textColor}`}>
                   Credibility Score: {primaryScore}% – {credibilityInfo.level}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {article.is_verified && expertScore != null
-                    ? "Score from expert review."
-                    : hasDbAnalysis
-                      ? "Automated fact-check (editor): claims, news evidence, and LLM assessment saved to this article."
-                      : ""}
+                  {hasDbAnalysis && article.is_verified
+                    ? "Includes expert review and automated fact-check (editor): claims, news evidence, and LLM assessment saved to this article."
+                    : article.is_verified && expertScore != null
+                      ? "Score from expert review."
+                      : hasDbAnalysis
+                        ? "Automated fact-check (editor): claims, news evidence, and LLM assessment saved to this article."
+                        : ""}
                 </p>
               </div>
             </div>
@@ -506,7 +646,7 @@ export function ArticleDetailPage() {
             </div>
 
             <div className="flex gap-2">
-              {user?.role === "premium" && (
+              {user && hasPremiumBenefits(user.role) && (
                 <>
                   <button
                     type="button"
@@ -562,7 +702,7 @@ export function ArticleDetailPage() {
                   </div>
                 </>
               )}
-              {user && (user.role === "free" || user.role === "premium") && (
+              {user && (
                 <div className="relative">
                   <button
                     type="button"
@@ -625,7 +765,7 @@ export function ArticleDetailPage() {
           </div>
         </div>
 
-        {user?.role === "premium" && (
+        {user && hasPremiumBenefits(user.role) && (
           <div className="mb-6 border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-blue-50">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
@@ -817,6 +957,101 @@ export function ArticleDetailPage() {
           </div>
         )}
 
+        {user?.role === "expert" ? (
+          <div className="mb-10 rounded-xl border border-slate-200 bg-slate-50/80 p-6">
+            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-red-600 shrink-0" />
+              Your expert review
+            </h2>
+            {myExpertReviewLoading ? (
+              <p className="text-sm text-muted-foreground">Loading your review…</p>
+            ) : myExpertReview ? (
+              <div className="flex gap-4">
+                <UserAvatar avatar={user.avatar} name={user.name} size="md" className="flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="font-semibold">{user.name}</span>
+                    {expertLabel ? (
+                      <span className="text-sm font-medium text-red-900 bg-red-50 border border-red-100 rounded-full px-2.5 py-0.5">
+                        {expertLabel}
+                      </span>
+                    ) : null}
+                    <span
+                      className={`text-xs font-semibold uppercase px-2 py-0.5 rounded ${
+                        myExpertReview.decision === "approved" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                      }`}
+                    >
+                      {myExpertReview.decision}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-3">{formatTimeAgo(myExpertReview.reviewed_at)}</p>
+                  {myExpertReview.comments?.trim() ? (
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap mb-4">{myExpertReview.comments}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground italic mb-4">No written comments in your review.</p>
+                  )}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-4">
+                    <span>
+                      Credibility score:{" "}
+                      <strong className="text-slate-900">{myExpertReview.credibility_score}</strong>
+                    </span>
+                    {myExpertReview.factual_accuracy != null ? (
+                      <span>
+                        Factual accuracy:{" "}
+                        <strong className="text-slate-900">{myExpertReview.factual_accuracy}</strong>
+                      </span>
+                    ) : null}
+                    {myExpertReview.rating != null ? (
+                      <span>
+                        Rating: <strong className="text-slate-900">{myExpertReview.rating}</strong>
+                      </span>
+                    ) : null}
+                  </div>
+                  {myExpertReviewSources.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Source{myExpertReviewSources.length > 1 ? "s" : ""}
+                      </p>
+                      {myExpertReviewSources.map((src, idx) => (
+                        <div
+                          key={`expert-review-src-${idx}`}
+                          className="text-xs border rounded-lg px-3 py-2 bg-white text-slate-700 space-y-1 font-mono"
+                        >
+                          <p>
+                            <a
+                              href={src.url}
+                              className="text-red-600 hover:underline break-all font-sans font-medium"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {src.sourceTitle || src.url}
+                            </a>
+                          </p>
+                          <p className="font-sans">
+                            Credibility: <span className="font-medium">{src.sourceCredibility ?? "—"}</span>
+                            {" · "}
+                            Check: <span className="font-medium">{src.aiVerdict ?? "—"}</span>
+                          </p>
+                          {src.reason ? (
+                            <p className="text-muted-foreground font-sans pt-1">{src.reason}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                You have not submitted an expert review for this article yet.{" "}
+                <Link to="/expert-dashboard" className="text-red-700 font-medium hover:underline">
+                  Open Expert Dashboard
+                </Link>
+              </p>
+            )}
+          </div>
+        ) : null}
+
         <div>
           <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
             <MessageCircle className="w-6 h-6" />
@@ -825,7 +1060,11 @@ export function ArticleDetailPage() {
 
           {user ? (
             <form onSubmit={handleCommentSubmit} className="mb-8">
+              <label htmlFor="article-comment-body" className="block text-sm font-medium mb-1">
+                Comment
+              </label>
               <textarea
+                id="article-comment-body"
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
@@ -853,7 +1092,9 @@ export function ArticleDetailPage() {
           )}
 
           <div className="space-y-6">
-            {comments.map((c) => (
+            {comments.map((c) => {
+              const sources = displaySourcesForComment(c);
+              return (
               <div key={c.id} className="flex gap-4">
                 <UserAvatar avatar={c.user?.avatar ?? undefined} name={c.user?.name ?? undefined} size="md" className="flex-shrink-0" />
                 <div className="flex-1">
@@ -898,10 +1139,43 @@ export function ArticleDetailPage() {
                       </div>
                     )}
                   </div>
-                  <p className="text-sm mb-2">{c.content}</p>
+                  <p className="text-sm">{c.content}</p>
+                  {sources.length > 0 ? (
+                    <div className="mt-2 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Source{sources.length > 1 ? "s" : ""}
+                      </p>
+                      {sources.map((src, idx) => (
+                        <div
+                          key={`${c.id}-src-${idx}`}
+                          className="text-xs border rounded-lg px-3 py-2 bg-slate-50 text-slate-700 space-y-1 font-mono"
+                        >
+                          <p>
+                            <a
+                              href={src.url}
+                              className="text-red-600 hover:underline break-all font-sans font-medium"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {src.sourceTitle || src.url}
+                            </a>
+                          </p>
+                          <p className="font-sans">
+                            Credibility: <span className="font-medium">{src.sourceCredibility ?? "—"}</span>
+                            {" · "}
+                            Check: <span className="font-medium">{src.aiVerdict ?? "—"}</span>
+                          </p>
+                          {src.reason ? (
+                            <p className="text-muted-foreground font-sans pt-1">{src.reason}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         </div>
 

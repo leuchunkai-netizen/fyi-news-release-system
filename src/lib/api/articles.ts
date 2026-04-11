@@ -1,9 +1,11 @@
 import { supabase } from "../supabase";
-import type { ArticleRow, ArticleStatus } from "../types/database";
+import type { ArticleRow, ArticleStatus, ExpertReviewRow } from "../types/database";
 
 export interface ArticleWithCategory extends ArticleRow {
   category?: { name: string; slug: string } | null;
   commentsCount?: number;
+  /** True when a row exists in `article_credibility_analysis` (saved AI / fact-check). */
+  hasCredibilityAnalysis?: boolean;
 }
 
 export interface TrendingArticleItem {
@@ -36,6 +38,17 @@ function takeEvenAlsoReadCount<T>(items: T[], max: number): T[] {
   const capped = Math.min(items.length, max);
   const even = Math.floor(capped / 2) * 2;
   return items.slice(0, even);
+}
+
+/** Article ids that have saved AI / fact-check analysis. */
+async function getArticleIdsWithCredibilityAnalysis(articleIds: string[]): Promise<Set<string>> {
+  if (articleIds.length === 0) return new Set();
+  const { data, error } = await supabase
+    .from("article_credibility_analysis")
+    .select("article_id")
+    .in("article_id", articleIds);
+  if (error) throw error;
+  return new Set((data ?? []).map((r: { article_id: string }) => r.article_id));
 }
 
 /** Fetch published articles (home, search). Optional: filter by category slug, text search, limit, offset. */
@@ -85,9 +98,12 @@ export async function getPublishedArticles(options?: {
     commentCountMap.set(key, (commentCountMap.get(key) ?? 0) + 1);
   }
 
+  const analysisSet = await getArticleIdsWithCredibilityAnalysis(articleIds);
+
   return articles.map((article) => ({
     ...article,
     commentsCount: commentCountMap.get(article.id) ?? 0,
+    hasCredibilityAnalysis: analysisSet.has(article.id),
   }));
 }
 
@@ -256,8 +272,8 @@ export async function reportArticle(articleId: string, userId: string, reason?: 
   if (error) throw error;
 }
 
-/** Published articles that are not yet approved by this expert. */
-export async function getExpertPendingArticles(expertId: string) {
+/** Category IDs matching an expert's approved `expert_applications.expertise` strings (same rules as legacy expert queue). */
+export async function getExpertApprovedCategoryIds(expertId: string): Promise<string[]> {
   const { data: expertiseRows, error: expertiseErr } = await supabase
     .from("expert_applications")
     .select("expertise")
@@ -281,7 +297,7 @@ export async function getExpertPendingArticles(expertId: string) {
   const { data: categories, error: categoriesErr } = await supabase.from("categories").select("id, name, slug");
   if (categoriesErr) throw categoriesErr;
   const normalizedExpertise = approvedExpertise.map((value) => value.toLowerCase());
-  const expertiseCategoryIds = Array.from(
+  return Array.from(
     new Set(
       (categories ?? [])
         .filter((category) => {
@@ -295,41 +311,127 @@ export async function getExpertPendingArticles(expertId: string) {
         .map((category) => (category as { id: string }).id)
     )
   );
-  if (expertiseCategoryIds.length === 0) return [];
+}
+
+/** This expert's `expert_reviews` row for an article, if any. */
+export async function getMyExpertReviewForArticle(
+  articleId: string,
+  expertId: string
+): Promise<ExpertReviewRow | null> {
+  const { data, error } = await supabase
+    .from("expert_reviews")
+    .select("*")
+    .eq("article_id", articleId)
+    .eq("expert_id", expertId)
+    .maybeSingle();
+  if (error) throw error;
+  return data as ExpertReviewRow | null;
+}
+
+/** True when credentials are not real applicant text (e.g. admin back-fill). */
+function isPlaceholderExpertCredentials(raw: string | null | undefined): boolean {
+  const s = raw?.trim() ?? "";
+  if (!s) return true;
+  return /^added by admin(istrator)?$/i.test(s);
+}
+
+/** Display label from approved application: prefer real applicant `credentials`, else expertise areas. */
+export async function getApprovedExpertProfileLabel(userId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("expert_applications")
+    .select("expertise, credentials, applied_at")
+    .eq("user_id", userId)
+    .eq("status", "approved")
+    .order("applied_at", { ascending: true });
+  if (error) throw error;
+  if (!data?.length) return null;
+
+  const cred = data
+    .map((r) => r.credentials?.trim())
+    .find((c) => c && !isPlaceholderExpertCredentials(c));
+  if (cred) return cred;
+
+  const areas = [
+    ...new Set(
+      data.flatMap((r) =>
+        (r.expertise ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    ),
+  ];
+  if (areas.length) return `Expert in ${areas.join(", ")}`;
+  return "Verified expert";
+}
+
+export type ExpertDashboardArticle = {
+  id: string;
+  title: string;
+  excerpt: string | null;
+  author_display_name: string | null;
+  created_at: string;
+  submitted_at: string | null;
+  published_at: string | null;
+  image_url: string | null;
+  category: { name: string } | null;
+  /** This expert's latest recorded decision for this article, if any */
+  myReviewDecision: "approved" | "rejected" | null;
+};
+
+/**
+ * Published articles in this expert's approved expertise categories only (newest first).
+ * Includes `myReviewDecision` when this expert has already submitted a review.
+ * Returns [] when the expert has no matching approved categories.
+ */
+export async function getExpertDashboardArticles(expertId: string, limit = 200): Promise<ExpertDashboardArticle[]> {
+  const categoryIds = await getExpertApprovedCategoryIds(expertId);
+  if (categoryIds.length === 0) return [];
 
   const { data, error } = await supabase
     .from("articles")
     .select("id, title, excerpt, author_display_name, created_at, submitted_at, published_at, image_url, category:categories(name)")
     .eq("status", "published")
-    .in("category_id", expertiseCategoryIds)
-    .order("published_at", { ascending: false });
+    .in("category_id", categoryIds)
+    .order("published_at", { ascending: false })
+    .limit(limit);
   if (error) throw error;
-  const published = (data ?? []) as {
-    id: string;
-    title: string;
-    excerpt: string | null;
-    author_display_name: string | null;
-    created_at: string;
-    submitted_at: string | null;
-    published_at: string | null;
-    image_url: string | null;
-    category: { name: string } | null;
-  }[];
+  const rows = (data ?? []) as Omit<ExpertDashboardArticle, "myReviewDecision">[];
+  if (rows.length === 0) return [];
 
-  if (published.length === 0) return [];
-
-  const publishedIds = published.map((item) => item.id);
-  const { data: approvedRows, error: approvedErr } = await supabase
+  const ids = rows.map((r) => r.id);
+  const { data: reviews, error: revErr } = await supabase
     .from("expert_reviews")
-    .select("article_id")
+    .select("article_id, decision")
     .eq("expert_id", expertId)
-    .eq("decision", "approved")
-    .in("article_id", publishedIds);
-  if (approvedErr) throw approvedErr;
+    .in("article_id", ids);
+  if (revErr) throw revErr;
+  const decisionByArticle = new Map<string, "approved" | "rejected">();
+  for (const r of reviews ?? []) {
+    const row = r as { article_id: string; decision: string };
+    decisionByArticle.set(row.article_id, row.decision as "approved" | "rejected");
+  }
 
-  const approvedByThisExpert = new Set((approvedRows ?? []).map((row) => (row as { article_id: string }).article_id));
-  return published.filter((item) => !approvedByThisExpert.has(item.id));
+  return rows.map((r) => ({
+    ...r,
+    myReviewDecision: decisionByArticle.get(r.id) ?? null,
+  }));
 }
+
+/** @deprecated Use getExpertDashboardArticles — kept for any external callers. */
+export async function getExpertPendingArticles(expertId: string) {
+  const all = await getExpertDashboardArticles(expertId, 200);
+  return all.filter((a) => a.myReviewDecision !== "approved");
+}
+
+/** Optional fields from verify-claim-source before expert_reviews upsert. */
+export type ExpertReviewSourceVerification = {
+  url: string;
+  sourceTitle: string;
+  sourceCredibility: string;
+  aiVerdict: string;
+  reason: string;
+};
 
 /** Submit expert review: insert expert_reviews and update article status. */
 export async function submitExpertReview(
@@ -342,9 +444,12 @@ export async function submitExpertReview(
     rating?: number | null;
     comments?: string | null;
     flagged?: boolean;
+    /** One or more verified sources (same shape as comments). */
+    sourceVerifications?: ExpertReviewSourceVerification[] | null;
   }
 ) {
-  const { error: reviewErr } = await supabase.from("expert_reviews").insert({
+  const list = params.sourceVerifications ?? [];
+  const reviewRow = {
     article_id: articleId,
     expert_id: expertId,
     credibility_score: params.credibilityScore,
@@ -353,6 +458,23 @@ export async function submitExpertReview(
     comments: params.comments ?? null,
     flagged: params.flagged ?? false,
     decision: params.decision,
+    reviewed_at: new Date().toISOString(),
+    ...(list.length > 0
+      ? {
+          source_url: list[0].url,
+          source_title: list.length > 1 ? `${list.length} sources` : list[0].sourceTitle,
+          source_credibility: list[0].sourceCredibility,
+          source_ai_verdict: list.every((s) => s.aiVerdict === "SUPPORT") ? "SUPPORT" : list[0].aiVerdict,
+          source_check_reason:
+            list.length > 1
+              ? `${list.length} links checked (all SUPPORT). First: ${list[0].reason}`
+              : list[0].reason,
+          source_references: list,
+        }
+      : {}),
+  };
+  const { error: reviewErr } = await supabase.from("expert_reviews").upsert(reviewRow, {
+    onConflict: "article_id,expert_id",
   });
   if (reviewErr) throw reviewErr;
   const updates =

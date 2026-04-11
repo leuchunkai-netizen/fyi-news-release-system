@@ -12,7 +12,9 @@ export async function getBookmarkIds(userId: string): Promise<string[]> {
 }
 
 /** Get full bookmarked articles for user (e.g. BookmarksPage). */
-export async function getBookmarkedArticles(userId: string): Promise<ArticleRow[]> {
+export async function getBookmarkedArticles(userId: string): Promise<
+  (ArticleRow & { hasCredibilityAnalysis?: boolean })[]
+> {
   const { data, error } = await supabase
     .from("bookmarks")
     .select("article_id, articles(*)")
@@ -20,7 +22,21 @@ export async function getBookmarkedArticles(userId: string): Promise<ArticleRow[
     .order("created_at", { ascending: false });
   if (error) throw error;
   const rows = (data ?? []) as { article_id: string; articles: ArticleRow | null }[];
-  return rows.map((r) => r.articles).filter(Boolean) as ArticleRow[];
+  const articles = rows.map((r) => r.articles).filter(Boolean) as ArticleRow[];
+  if (articles.length === 0) return [];
+
+  const ids = articles.map((a) => a.id);
+  const { data: analysisRows, error: analysisErr } = await supabase
+    .from("article_credibility_analysis")
+    .select("article_id")
+    .in("article_id", ids);
+  if (analysisErr) throw analysisErr;
+  const analysisSet = new Set((analysisRows ?? []).map((r: { article_id: string }) => r.article_id));
+
+  return articles.map((a) => ({
+    ...a,
+    hasCredibilityAnalysis: analysisSet.has(a.id),
+  }));
 }
 
 /** Add bookmark. */

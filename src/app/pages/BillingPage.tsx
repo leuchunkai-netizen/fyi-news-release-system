@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { CreditCard, CheckCircle, ArrowLeft } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { supabase } from "../../lib/supabase";
+import { hasPremiumBenefits } from "../../lib/userRoles";
 
 export function BillingPage() {
   const { user, setUser } = useUser();
@@ -32,7 +33,7 @@ export function BillingPage() {
     }
   };
 
-  const isPremium = user.role === "premium";
+  const isPremium = hasPremiumBenefits(user.role);
 
   return (
     <div className="container mx-auto px-4 py-12 max-w-3xl">
@@ -66,7 +67,7 @@ export function BillingPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <p className="font-semibold">
-                {isPremium ? "Premium" : "Free"}
+                {isPremium ? (user.role === "expert" ? "Premium & Expert" : "Premium") : "Free"}
               </p>
               <p className="text-sm text-muted-foreground">
                 {isPremium ? "$9.99/month · full access" : "$0/month · basic access"}
@@ -108,13 +109,19 @@ export function BillingPage() {
               >
                 Update payment method
               </Link>
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="block w-full px-4 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 text-sm"
-              >
-                Cancel Premium and switch to Free
-              </button>
+              {user.role === "premium" ? (
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="block w-full px-4 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 text-sm"
+                >
+                  Cancel Premium and switch to Free
+                </button>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Plan changes for Expert accounts may affect verification status. Contact support to change your subscription.
+                </p>
+              )}
             </>
           ) : (
             <>

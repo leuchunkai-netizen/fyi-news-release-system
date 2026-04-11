@@ -167,6 +167,12 @@ export interface Database {
           flagged: boolean;
           decision: ExpertReviewDecision;
           reviewed_at: string;
+          source_url: string | null;
+          source_title: string | null;
+          source_credibility: string | null;
+          source_ai_verdict: string | null;
+          source_check_reason: string | null;
+          source_references: unknown | null;
         };
         Insert: {
           id?: string;
@@ -179,6 +185,12 @@ export interface Database {
           flagged?: boolean;
           decision: ExpertReviewDecision;
           reviewed_at?: string;
+          source_url?: string | null;
+          source_title?: string | null;
+          source_credibility?: string | null;
+          source_ai_verdict?: string | null;
+          source_check_reason?: string | null;
+          source_references?: unknown | null;
         };
         Update: Partial<Database["public"]["Tables"]["expert_reviews"]["Insert"]>;
       };
@@ -192,6 +204,12 @@ export interface Database {
           status: CommentStatus;
           created_at: string;
           updated_at: string;
+          source_url: string | null;
+          source_title: string | null;
+          source_credibility: string | null;
+          source_ai_verdict: string | null;
+          source_check_reason: string | null;
+          source_references: unknown | null;
         };
         Insert: {
           id?: string;
@@ -202,6 +220,12 @@ export interface Database {
           status?: CommentStatus;
           created_at?: string;
           updated_at?: string;
+          source_url?: string | null;
+          source_title?: string | null;
+          source_credibility?: string | null;
+          source_ai_verdict?: string | null;
+          source_check_reason?: string | null;
+          source_references?: unknown | null;
         };
         Update: Partial<Database["public"]["Tables"]["comments"]["Insert"]>;
       };
@@ -337,3 +361,4 @@ export type ArticleRow = Database["public"]["Tables"]["articles"]["Row"];
 export type CommentRow = Database["public"]["Tables"]["comments"]["Row"];
 export type TestimonialRow = Database["public"]["Tables"]["testimonials"]["Row"];
 export type BookmarkRow = Database["public"]["Tables"]["bookmarks"]["Row"];
+export type ExpertReviewRow = Database["public"]["Tables"]["expert_reviews"]["Row"];

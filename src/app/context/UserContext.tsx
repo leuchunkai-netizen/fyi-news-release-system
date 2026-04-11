@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { getCurrentUserWithInterests, signOut as authSignOut } from "@/lib/api/auth";
+import { supabase } from "@/lib/supabase";
 
 export type UserRole = "guest" | "free" | "premium" | "expert" | "admin";
 
@@ -55,12 +56,38 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getCurrentUserWithInterests()
-      .then((data) => {
-        if (data) setUser(profileToUser(data.profile, data.interests));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    let mounted = true;
+
+    const load = () => {
+      getCurrentUserWithInterests()
+        .then((data) => {
+          if (!mounted) return;
+          if (data) setUser(profileToUser(data.profile, data.interests));
+          else setUser(null);
+        })
+        .catch(() => {
+          if (mounted) setUser(null);
+        })
+        .finally(() => {
+          if (mounted) setLoading(false);
+        });
+    };
+
+    load();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (!mounted) return;
+      if (event === "TOKEN_REFRESHED") return;
+      setLoading(true);
+      load();
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const logout = async () => {

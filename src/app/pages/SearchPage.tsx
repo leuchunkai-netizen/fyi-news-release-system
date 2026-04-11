@@ -36,6 +36,7 @@ function mapArticleToCard(a: ArticleWithCategory) {
     commentsCount: a.commentsCount ?? 0,
     credibilityScore: a.credibility_score ?? undefined,
     isVerified: a.is_verified,
+    hasAiCredibility: a.hasCredibilityAnalysis === true,
   };
 }
 

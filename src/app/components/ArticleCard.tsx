@@ -15,6 +15,8 @@ interface ArticleCardProps {
   commentsCount?: number;
   credibilityScore?: number;
   isVerified?: boolean;
+  /** Saved AI / fact-check row in `article_credibility_analysis`. When true with `isVerified`, both ticks show. */
+  hasAiCredibility?: boolean;
 }
 
 export function ArticleCard({ 
@@ -29,9 +31,17 @@ export function ArticleCard({
   views,
   commentsCount,
   credibilityScore,
-  isVerified
+  isVerified,
+  hasAiCredibility,
 }: ArticleCardProps) {
   const { user } = useUser();
+
+  const showAiTick =
+    hasAiCredibility === true ||
+    (hasAiCredibility === undefined &&
+      !isVerified &&
+      credibilityScore != null &&
+      credibilityScore > 0);
 
   if (variant === "compact") {
     return (
@@ -54,12 +64,12 @@ export function ArticleCard({
               {category}
             </span>
             {isVerified && (
-              <CheckCircle
-                className="w-3 h-3 text-blue-600"
-                title="Verified by Expert"
-              />
+              <CheckCircle className="w-3 h-3 text-blue-600 shrink-0" title="Verified by expert" aria-label="Verified by expert" />
             )}
-            {credibilityScore && (
+            {showAiTick && (
+              <CheckCircle className="w-3 h-3 text-green-600 shrink-0" title="AI fact-check credibility" aria-label="AI fact-check credibility" />
+            )}
+            {credibilityScore != null && credibilityScore > 0 && (
               <span className="text-[10px] font-bold">
                 {credibilityScore}% Credible
               </span>
@@ -120,9 +130,12 @@ export function ArticleCard({
               {category}
             </span>
             {isVerified && (
-              <CheckCircle className="w-4 h-4 text-blue-600" title="Verified by Expert" />
+              <CheckCircle className="w-4 h-4 text-blue-600 shrink-0" title="Verified by expert" aria-label="Verified by expert" />
             )}
-            {credibilityScore && (
+            {showAiTick && (
+              <CheckCircle className="w-4 h-4 text-green-600 shrink-0" title="AI fact-check credibility" aria-label="AI fact-check credibility" />
+            )}
+            {credibilityScore != null && credibilityScore > 0 && (
               <span className="text-xs font-bold">
                 {credibilityScore}% Credible
               </span>
@@ -179,9 +192,12 @@ export function ArticleCard({
             {category}
           </span>
           {isVerified && (
-            <CheckCircle className="w-4 h-4 text-blue-600" title="Verified by Expert" />
+            <CheckCircle className="w-4 h-4 text-blue-600 shrink-0" title="Verified by expert" aria-label="Verified by expert" />
           )}
-          {credibilityScore && (
+          {showAiTick && (
+            <CheckCircle className="w-4 h-4 text-green-600 shrink-0" title="AI fact-check credibility" aria-label="AI fact-check credibility" />
+          )}
+          {credibilityScore != null && credibilityScore > 0 && (
             <span className="text-xs font-bold">
               {credibilityScore}% Credible
             </span>

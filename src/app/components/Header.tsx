@@ -5,6 +5,7 @@ import { useUser } from "../context/UserContext";
 import { UserAvatar } from "./UserAvatar";
 import { getCategories } from "../../lib/api/categories";
 import type { CategoryRow } from "../../lib/types/database";
+import { canAuthorArticles, hasPremiumBenefits } from "../../lib/userRoles";
 
 export function Header() {
   const { user, logout } = useUser();
@@ -75,7 +76,7 @@ export function Header() {
                       <User className="w-4 h-4" />
                       Profile
                     </Link>
-                    {user.role === "free" || user.role === "premium" ? (
+                    {canAuthorArticles(user.role) ? (
                       <>
                         <Link to="/my-articles" className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100">
                           <Upload className="w-4 h-4" />
@@ -83,7 +84,7 @@ export function Header() {
                         </Link>
                       </>
                     ) : null}
-                    {user.role === "premium" && (
+                    {hasPremiumBenefits(user.role) && (
                       <>
                         <Link to="/bookmarks" className="flex items-center gap-2 px-4 py-2 hover:bg-gray-100">
                           <BookMarked className="w-4 h-4" />
@@ -202,14 +203,14 @@ export function Header() {
                     </div>
                   </li>
                 )}
-                {(user.role === "free" || user.role === "premium") && (
+                {canAuthorArticles(user.role) && (
                   <li>
                     <Link to="/my-articles" className={`${navLinkClass("/my-articles")} font-semibold`}>
                       My Articles
                     </Link>
                   </li>
                 )}
-                {(user.role === "free" || user.role === "premium") && (
+                {canAuthorArticles(user.role) && (
                   <li>
                     <Link
                       to="/upload-article"

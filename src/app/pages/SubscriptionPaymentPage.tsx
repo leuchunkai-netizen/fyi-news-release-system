@@ -45,7 +45,8 @@ export function SubscriptionPaymentPage() {
   const { user, setUser } = useUser();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const isUpdateMode = user?.role === "premium" || searchParams.get("update") === "1";
+  const isUpdateMode =
+    user?.role === "premium" || user?.role === "expert" || searchParams.get("update") === "1";
   const plan = (searchParams.get("plan") === "yearly" ? "yearly" : "monthly") as "monthly" | "yearly";
   const planLabel =
     plan === "yearly" ? "Premium (Yearly) · $59.88/year (equiv. $4.99/month)" : "Premium · $9.99/month";
@@ -76,10 +77,12 @@ export function SubscriptionPaymentPage() {
     );
   }
 
-  if (user.role === "premium" && !searchParams.get("update")) {
+  if ((user.role === "premium" || user.role === "expert") && !searchParams.get("update")) {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
-        <h1 className="text-2xl font-semibold mb-4">You're already Premium</h1>
+        <h1 className="text-2xl font-semibold mb-4">
+          {user.role === "expert" ? "You already have Premium benefits" : "You're already Premium"}
+        </h1>
         <Link to="/profile" className="text-red-600 font-medium hover:underline">
           Go to Profile
         </Link>
