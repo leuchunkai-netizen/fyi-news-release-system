@@ -384,7 +384,7 @@ export function ExpertDashboard() {
             onClick={() => setListFilter("needs_review")}
             className={`px-3 py-1.5 rounded-lg text-sm border ${listFilter === "needs_review" ? "bg-red-600 text-white border-red-600" : "bg-white hover:bg-gray-50"}`}
           >
-            Not yet approved by you (
+            Not yet reviewed by you (
             {articles.filter((a) => a.myReviewDecision !== "approved").length})
           </button>
           <button
