@@ -137,6 +137,8 @@ export interface Database {
           strengths: unknown;
           concerns: unknown;
           warnings: unknown;
+          /** News pipeline evidence rows for "Evidence snippets used" on article page */
+          evidence_snippets: unknown | null;
           created_at: string;
         };
         Insert: {
@@ -151,6 +153,7 @@ export interface Database {
           strengths?: unknown;
           concerns?: unknown;
           warnings?: unknown;
+          evidence_snippets?: unknown | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["article_credibility_analysis"]["Insert"]>;
@@ -329,6 +332,7 @@ export interface Database {
           user_id: string;
           expertise: string;
           credentials: string;
+          proof_document_url: string | null;
           status: ExpertApplicationStatus;
           applied_at: string;
           reviewed_at: string | null;
@@ -339,6 +343,7 @@ export interface Database {
           user_id: string;
           expertise: string;
           credentials: string;
+          proof_document_url?: string | null;
           status?: ExpertApplicationStatus;
           applied_at?: string;
           reviewed_at?: string | null;

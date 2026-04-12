@@ -8,6 +8,17 @@ function isMockEvidenceItem(e) {
   return String(e.desc || "").includes("Placeholder");
 }
 
+/** Persist pipeline evidence for readers (matches upload page "Evidence snippets used"). */
+function serializeEvidenceSnippets(top3) {
+  const arr = Array.isArray(top3) ? top3 : [];
+  return arr.map((e) => ({
+    title: String(e?.title ?? "").slice(0, 500),
+    source: String(e?.source ?? "").slice(0, 200),
+    desc: String(e?.desc ?? "").slice(0, 2000),
+    ...(typeof e?.link === "string" && e.link.trim() ? { link: e.link.trim().slice(0, 2000) } : {}),
+  }));
+}
+
 /**
  * @param {*} fc fact-check LLM result
  * @param {Array<{ claim?: string, q?: string }>} _claimsList unused; reserved for future weighting
@@ -55,6 +66,10 @@ function mapPipelineToCredibilityRow(fc, _claimsList, top3, userSourceChecks = [
 
   const citationsScore = Math.min(100, evidence.length * 34);
 
+  /** Snippets shown on the article page: same rows the LLM used (factCheckLLM `evidenceUsed`), else pipeline top slice. */
+  const evidenceForDisplay =
+    Array.isArray(fc?.evidenceUsed) && fc.evidenceUsed.length > 0 ? fc.evidenceUsed : evidence;
+
   const strengths = [];
   if (supported > 0) strengths.push(`${supported} of ${total} checked claim(s) supported by retrieved evidence.`);
   if (verdict === "VERIFIED") strengths.push("Overall verdict: verified against the evidence provided.");
@@ -79,17 +94,15 @@ function mapPipelineToCredibilityRow(fc, _claimsList, top3, userSourceChecks = [
     warnings.push("Some evidence slots used placeholder or mock sources; widen NewsData queries or domains.");
   }
 
-  const showSources = submitted.slice(0, 6);
+  /** Only surface SUPPORT checks in saved analysis text (omit UNRELATED, CONTRADICT). */
+  const supportOnlySubmitted = submitted.filter((s) => String(s?.aiVerdict || "").toUpperCase() === "SUPPORT");
+  const showSources = supportOnlySubmitted.slice(0, 6);
   if (showSources.length > 0) {
-    strengths.push(`User submitted ${submitted.length} source link(s) for re-check.`);
+    strengths.push(`User submitted ${showSources.length} supporting source link(s) for re-check.`);
     for (const s of showSources) {
       const titleOrUrl = String(s.sourceTitle || s.sourceUrl || "User source");
-      const line = `${String(s.aiVerdict || "UNRELATED")} (${String(s.sourceCredibility || "LOW")}): ${titleOrUrl}`;
-      if (String(s.aiVerdict || "").toUpperCase() === "CONTRADICT") {
-        concerns.push(line.slice(0, 500));
-      } else {
-        strengths.push(line.slice(0, 500));
-      }
+      const line = `SUPPORT (${String(s.sourceCredibility || "LOW")}): ${titleOrUrl}`;
+      strengths.push(line.slice(0, 500));
     }
   }
 
@@ -103,6 +116,7 @@ function mapPipelineToCredibilityRow(fc, _claimsList, top3, userSourceChecks = [
     strengths: strengths.filter(Boolean).slice(0, 12),
     concerns: concerns.slice(0, 12),
     warnings: warnings.slice(0, 12),
+    evidence_snippets: serializeEvidenceSnippets(evidenceForDisplay),
   };
 }
 

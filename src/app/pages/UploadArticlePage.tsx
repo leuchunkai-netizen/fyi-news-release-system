@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router";
 import { AlertTriangle, ClipboardCheck, Upload, X } from "lucide-react";
 import { useUser } from "../context/UserContext";
@@ -18,16 +18,29 @@ interface RejectionFinding {
 
 type ClaimSignal = { verdict: "SUPPORT" | "CONTRADICT" | "UNRELATED"; credibility: "HIGH" | "LOW" };
 
+/** Bonus points from user-verified sources only; never reduces base pipeline confidence. */
 function estimateSourceDelta(rows: ClaimSourceVerifyResult[]) {
   const checks = Array.isArray(rows) ? rows : [];
   const supportHigh = checks.filter((r) => r.aiVerdict === "SUPPORT" && r.sourceCredibility === "HIGH").length;
   const supportLow = checks.filter((r) => r.aiVerdict === "SUPPORT" && r.sourceCredibility === "LOW").length;
-  const contradicts = checks.filter((r) => r.aiVerdict === "CONTRADICT").length;
-  return Math.min(15, supportHigh * 5) + Math.min(6, supportLow * 2) - contradicts * 12;
+  return Math.min(15, supportHigh * 5) + Math.min(6, supportLow * 2);
 }
 
 function flattenChecksByClaim(allByClaim: Record<number, ClaimSourceVerifyResult[]>) {
   return Object.values(allByClaim || {}).flatMap((rows) => (Array.isArray(rows) ? rows : []));
+}
+
+/** Single place for pipeline base + optional source bonus → estimated total (matches submit-review logic). */
+function computeScoreBreakdown(
+  result: FactcheckResult | null,
+  claimVerifyResults: Record<number, ClaimSourceVerifyResult[]>
+) {
+  if (!result) return null;
+  const pipelineScore = Math.round(Number(result.confidence) || 0);
+  const allChecks = flattenChecksByClaim(claimVerifyResults);
+  const sourceBonus = estimateSourceDelta(allChecks);
+  const estimatedTotal = Math.max(0, Math.min(100, pipelineScore + sourceBonus));
+  return { pipelineScore, sourceBonus, estimatedTotal };
 }
 
 function stripHtml(input: string): string {
@@ -87,6 +100,11 @@ export function UploadArticlePage() {
   const [claimVerifyLoading, setClaimVerifyLoading] = useState<Record<number, boolean>>({});
   const [claimVerifyErrors, setClaimVerifyErrors] = useState<Record<number, string>>({});
   const [claimVerifyResults, setClaimVerifyResults] = useState<Record<number, ClaimSourceVerifyResult[]>>({});
+
+  const factcheckScoreBreakdown = useMemo(
+    () => computeScoreBreakdown(factcheckResult, claimVerifyResults),
+    [factcheckResult, claimVerifyResults]
+  );
 
   useEffect(() => {
     getCategories().then(setCategories).catch(() => setCategories([]));
@@ -331,6 +349,8 @@ export function UploadArticlePage() {
             articleId: resolvedArticleId,
             title: title || undefined,
             body: formData.content.trim() || "",
+            pipelineConfidence:
+              factcheckResult != null ? Math.round(Number(factcheckResult.confidence) || 0) : undefined,
             userSourceChecks: checksForSubmit,
           });
           navigate("/my-articles", {
@@ -540,20 +560,51 @@ export function UploadArticlePage() {
             {factcheckResult && (
               <div className="space-y-3 text-sm">
                 <p>
-                  <span className="font-semibold">Overall:</span>{" "}
+                  <span className="font-semibold">Automated verdict:</span>{" "}
                   <span className="uppercase tracking-wide">{factcheckResult.verdict}</span>
-                  {" · "}
-                  <span className="text-muted-foreground">Confidence {factcheckResult.confidence}%</span>
                 </p>
                 <p className="text-muted-foreground">{factcheckResult.summary}</p>
+                {factcheckScoreBreakdown && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+                    <p className="font-semibold text-slate-900">Confidence — how this adds up</p>
+                    <dl className="space-y-2.5 text-slate-800">
+                      <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                        <dt className="text-muted-foreground min-w-[12rem] flex-1">
+                          Starting score (from your draft + retrieved news evidence)
+                        </dt>
+                        <dd className="font-semibold tabular-nums shrink-0">{factcheckScoreBreakdown.pipelineScore}%</dd>
+                      </div>
+                      <div className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                        <dt className="text-muted-foreground min-w-[12rem] flex-1">
+                          Extra points from your verified links (SUPPORT only, capped)
+                        </dt>
+                        <dd className="font-semibold tabular-nums shrink-0 text-green-800">
+                          {factcheckScoreBreakdown.sourceBonus > 0
+                            ? `+${factcheckScoreBreakdown.sourceBonus}`
+                            : "0 (add sources on unverified claims below)"}
+                        </dd>
+                      </div>
+                      <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-t border-slate-200 pt-3">
+                        <dt className="font-semibold text-slate-900 min-w-[12rem] flex-1">Estimated score if you submit now</dt>
+                        <dd className="font-bold tabular-nums text-lg text-slate-900 shrink-0">
+                          {factcheckScoreBreakdown.estimatedTotal}%
+                        </dd>
+                      </div>
+                    </dl>
+                    <p className="text-xs text-muted-foreground leading-relaxed border-t border-slate-100 pt-2">
+                      Everyone starts from the same <strong className="text-slate-700">starting score</strong> after you run
+                      fact check. Verifying sources only <strong className="text-slate-700">adds</strong> bonus points — it does
+                      not replace that base. One estimated total applies to the whole article (not per claim).
+                    </p>
+                  </div>
+                )}
                 {Array.isArray(factcheckResult.claims) && factcheckResult.claims.length > 0 && (
                   <ul className="space-y-3">
                     {factcheckResult.claims.map((c, i) => {
                       const checks = claimVerifyResults[i] || [];
-                      const allChecks = flattenChecksByClaim(claimVerifyResults);
-                      const delta = estimateSourceDelta(allChecks);
-                      const baseConfidence = Math.round(Number(factcheckResult.confidence) || 0);
-                      const adjustedPreview = Math.max(0, Math.min(100, baseConfidence + delta));
+                      const checksVisible = checks.filter(
+                        (row) => String(row.aiVerdict).toUpperCase() === "SUPPORT"
+                      );
                       return (
                         <li key={i} className="border border-slate-200 rounded p-3 bg-white">
                           <p>
@@ -586,15 +637,13 @@ export function UploadArticlePage() {
                               {claimVerifyErrors[i] ? (
                                 <p className="text-xs text-red-700">{claimVerifyErrors[i]}</p>
                               ) : null}
-                              {checks.length > 0 &&
-                                checks.map((row, idx) => (
+                              {checksVisible.length > 0 &&
+                                checksVisible.map((row, idx) => (
                                   <div key={idx} className="text-xs border rounded p-2 bg-slate-50 space-y-1">
                                     <p>
                                       Source credibility: <span className="font-semibold">{row.sourceCredibility}</span>
                                       {" · "}
                                       AI verdict: <span className="font-semibold">{row.aiVerdict}</span>
-                                      {" · "}
-                                      Final decision: <span className="font-semibold">{row.finalDecision}</span>
                                     </p>
                                     <p className="text-slate-700">{row.reason}</p>
                                     {row.evidenceQuote ? (
@@ -604,9 +653,10 @@ export function UploadArticlePage() {
                                     ) : null}
                                   </div>
                                 ))}
-                              {checks.length > 0 ? (
-                                <p className="text-xs text-slate-700 bg-slate-100 border border-slate-200 rounded px-2 py-1">
-                                  Added result: Base {baseConfidence}% -&gt; Preview {adjustedPreview}% from all source checks so far.
+                              {checksVisible.length > 0 ? (
+                                <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1.5">
+                                  These verified links count toward the <strong>extra points</strong> in the score box above
+                                  (shared across all claims).
                                 </p>
                               ) : null}
                             </div>

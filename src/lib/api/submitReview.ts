@@ -6,7 +6,11 @@ export type SubmitReviewResult = {
   verdict: string;
   confidence: number;
   baseVerdict?: string;
+  /** Base used for scoring (editor pipeline when sent, else server re-run). */
   baseConfidence?: number;
+  /** Second server-only pipeline run (can differ from the editor). */
+  serverBaseConfidence?: number;
+  usedClientPipelineConfidence?: boolean;
   minConfidence: number;
   allowedVerdicts: string[];
   credibilitySaved?: boolean;
@@ -52,6 +56,8 @@ export async function evaluateSubmitForReview(params: {
   articleId: string;
   title?: string;
   body: string;
+  /** From last Run fact check in the editor so saved score matches the preview (optional). */
+  pipelineConfidence?: number;
   userSourceChecks?: Array<{
     claim?: string;
     sourceUrl?: string;

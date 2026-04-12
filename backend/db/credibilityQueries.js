@@ -32,6 +32,7 @@ async function upsertCredibilityFromFactcheck(articleId, pipelineResult, options
       strengths: row.strengths,
       concerns: row.concerns,
       warnings: row.warnings,
+      evidence_snippets: row.evidence_snippets ?? [],
     },
     { onConflict: "article_id" }
   );

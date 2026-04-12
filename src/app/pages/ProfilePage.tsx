@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Shield, Upload as UploadIcon, CheckCircle } from "lucide-react";
 import { useUser } from "../context/UserContext";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { upsertUserProfile, getCurrentUserWithInterests } from "../../lib/api/auth";
 import { setUserInterests } from "../../lib/api/userInterests";
 import { submitExpertApplication } from "../../lib/api/expertApplications";
+import { uploadExpertProofDocument } from "../../lib/storage";
 import { getCategories } from "../../lib/api/categories";
 import { supabase } from "../../lib/supabase";
 import { UserAvatar } from "../components/UserAvatar";
@@ -14,6 +15,7 @@ import { hasPremiumBenefits } from "../../lib/userRoles";
 
 export function ProfilePage() {
   const { user, setUser } = useUser();
+  const location = useLocation();
   const [isEditing, setIsEditing] = useState(false);
   const [showExpertApplication, setShowExpertApplication] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -62,7 +64,7 @@ export function ProfilePage() {
     getCategories().then(setExpertiseCategories).catch(() => setExpertiseCategories([]));
   }, []);
 
-  useEffect(() => {
+  const loadApprovedExpertiseAreas = useCallback(() => {
     if (!user?.id || user.role !== "expert") {
       setApprovedExpertiseAreas([]);
       return;
@@ -88,6 +90,18 @@ export function ProfilePage() {
       })
       .catch(() => setApprovedExpertiseAreas([]));
   }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    loadApprovedExpertiseAreas();
+  }, [loadApprovedExpertiseAreas, location.pathname]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") loadApprovedExpertiseAreas();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [loadApprovedExpertiseAreas]);
 
   if (!user) {
     return (
@@ -159,9 +173,14 @@ export function ProfilePage() {
       return;
     }
     const credentials = [expertApplication.credentials, expertApplication.experience].filter(Boolean).join("\n\n");
+    if (!expertApplication.proofDocument) {
+      alert("Please upload proof of expertise (credentials, diploma, or certificate).");
+      return;
+    }
     setExpertSubmitting(true);
     try {
-      await submitExpertApplication(user.id, selectedCategoryNames.join(", "), credentials);
+      const proofUrl = await uploadExpertProofDocument(expertApplication.proofDocument, user.id);
+      await submitExpertApplication(user.id, selectedCategoryNames.join(", "), credentials, proofUrl);
       setShowExpertApplication(false);
       setExpertApplication({ expertise: [], credentials: "", experience: "", proofDocument: null });
       alert("Expert verification application submitted! We'll review it within 5-7 business days.");

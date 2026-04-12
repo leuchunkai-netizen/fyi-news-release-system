@@ -181,7 +181,7 @@ async function submitForReview(req, res) {
       return res.status(401).json({ error: "Sign in required, or configure SUPABASE_ANON_KEY on the API server." });
     }
 
-    const { articleId, title, body, userSourceChecks } = req.body || {};
+    const { articleId, title, body, userSourceChecks, pipelineConfidence: clientPipelineConfidence } = req.body || {};
     if (!articleId || typeof articleId !== "string") {
       return res.status(400).json({ error: "Missing articleId" });
     }
@@ -221,13 +221,24 @@ async function submitForReview(req, res) {
       .filter(Boolean);
 
     const baseVerdict = String(result.fc.verdict || "UNCERTAIN").toUpperCase();
-    const baseConfidence = Math.max(0, Math.min(100, Number(result.fc.confidence) || 0));
+    const serverBaseConfidence = Math.max(0, Math.min(100, Number(result.fc.confidence) || 0));
+    /** Match the score shown in the editor: authors send the confidence from their last "Run fact check" so a second LLM run cannot swap 81% for 49%. */
+    const parsedClient =
+      clientPipelineConfidence != null && Number.isFinite(Number(clientPipelineConfidence))
+        ? Math.max(0, Math.min(100, Math.round(Number(clientPipelineConfidence))))
+        : null;
+    const baseConfidence = parsedClient != null ? parsedClient : serverBaseConfidence;
     const checksRaw = Array.isArray(userSourceChecks) ? userSourceChecks : [];
-    const checks = checksRaw.filter((c) => checkLooksRelevantToClaims(c, result.fc.claims));
+    let checks = checksRaw.filter((c) => checkLooksRelevantToClaims(c, result.fc.claims));
+    // Second pipeline run can extract slightly different claim strings; if nothing matches, still count client checks for bonuses.
+    if (checks.length === 0 && checksRaw.length > 0) {
+      checks = checksRaw;
+    }
     const supportHigh = checks.filter((c) => c?.aiVerdict === "SUPPORT" && c?.sourceCredibility === "HIGH").length;
     const supportLow = checks.filter((c) => c?.aiVerdict === "SUPPORT" && c?.sourceCredibility === "LOW").length;
     const contradicts = checks.filter((c) => c?.aiVerdict === "CONTRADICT").length;
-    let confidence = baseConfidence + Math.min(15, supportHigh * 5) + Math.min(6, supportLow * 2) - contradicts * 12;
+    // User source checks can only boost confidence; contradicting sources still affect verdict below, not the score.
+    let confidence = baseConfidence + Math.min(15, supportHigh * 5) + Math.min(6, supportLow * 2);
     confidence = Math.max(0, Math.min(100, confidence));
     let verdict = baseVerdict;
     if (contradicts > 0) {
@@ -282,6 +293,8 @@ async function submitForReview(req, res) {
       confidence,
       baseVerdict,
       baseConfidence,
+      serverBaseConfidence,
+      usedClientPipelineConfidence: parsedClient != null,
       minConfidence: minConf,
       allowedVerdicts,
       credibilitySaved: saveCred.ok,

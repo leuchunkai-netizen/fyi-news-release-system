@@ -39,6 +39,8 @@ export interface AdminExpertApplication {
   email: string;
   expertise: string;
   credentials: string;
+  /** Public URL of uploaded proof (image/PDF), if provided. */
+  proofDocumentUrl: string | null;
   status: string;
   appliedDate: string;
   user_id: string;
@@ -235,7 +237,7 @@ export async function getAdminComments(): Promise<AdminComment[]> {
 export async function getAdminExpertApplications(): Promise<AdminExpertApplication[]> {
   const { data: apps, error: appsError } = await supabase
     .from("expert_applications")
-    .select("id, user_id, expertise, credentials, status, applied_at")
+    .select("id, user_id, expertise, credentials, proof_document_url, status, applied_at")
     .order("applied_at", { ascending: false });
   if (appsError) throw appsError;
   const list =
@@ -245,6 +247,7 @@ export async function getAdminExpertApplications(): Promise<AdminExpertApplicati
           user_id: string;
           expertise: string;
           credentials: string;
+          proof_document_url: string | null;
           status: string;
           applied_at: string | null;
         }[]
@@ -268,6 +271,7 @@ export async function getAdminExpertApplications(): Promise<AdminExpertApplicati
       email: userMap.get(a.user_id)?.email ?? "",
       expertise: a.expertise,
       credentials: a.credentials,
+      proofDocumentUrl: a.proof_document_url ?? null,
       status: a.status,
       appliedDate: a.applied_at
         ? new Date(a.applied_at).toLocaleDateString("en-US", {
@@ -285,6 +289,7 @@ export async function getAdminExpertApplications(): Promise<AdminExpertApplicati
       email: "",
       expertise: a.expertise,
       credentials: a.credentials,
+      proofDocumentUrl: a.proof_document_url ?? null,
       status: a.status,
       appliedDate: a.applied_at
         ? new Date(a.applied_at).toLocaleDateString("en-US", {
@@ -341,25 +346,12 @@ export async function updateExpertApplicationStatus(
   status: "approved" | "rejected",
   reviewedByUserId?: string
 ) {
-  const { data: app, error: fetchErr } = await supabase
-    .from("expert_applications")
-    .select("user_id")
-    .eq("id", applicationId)
-    .single();
-  if (fetchErr || !app) throw fetchErr || new Error("Application not found");
-  const { error: updateApp } = await supabase
-    .from("expert_applications")
-    .update({
-      status,
-      reviewed_at: new Date().toISOString(),
-      ...(reviewedByUserId && { reviewed_by: reviewedByUserId }),
-    })
-    .eq("id", applicationId);
-  if (updateApp) throw updateApp;
-  if (status === "approved") {
-    const { error: updateUser } = await supabase.from("users").update({ role: "expert" }).eq("id", app.user_id);
-    if (updateUser) throw updateUser;
-  }
+  const { error } = await supabase.rpc("admin_set_expert_application_status", {
+    p_application_id: applicationId,
+    p_status: status,
+    p_reviewed_by: reviewedByUserId ?? null,
+  });
+  if (error) throw error;
 }
 
 /** Create category (admin only). */

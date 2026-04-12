@@ -2043,6 +2043,33 @@ export function AdminDashboard() {
                   {selectedExpert.credentials || "No details provided."}
                 </dd>
               </div>
+              {selectedExpert.proofDocumentUrl ? (
+                <div>
+                  <dt className="font-medium text-gray-700 mb-1">Proof of expertise</dt>
+                  <dd className="space-y-2">
+                    {/\.(jpe?g|png|gif|webp)(\?|$)/i.test(selectedExpert.proofDocumentUrl) ? (
+                      <img
+                        src={selectedExpert.proofDocumentUrl}
+                        alt="Applicant proof of expertise"
+                        className="max-w-full max-h-64 rounded-md border border-gray-200 object-contain bg-gray-50"
+                      />
+                    ) : null}
+                    <a
+                      href={selectedExpert.proofDocumentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline text-sm inline-block"
+                    >
+                      {/\.pdf(\?|$)/i.test(selectedExpert.proofDocumentUrl) ? "Open PDF" : "Open uploaded file"}
+                    </a>
+                  </dd>
+                </div>
+              ) : (
+                <div>
+                  <dt className="font-medium text-gray-700 mb-1">Proof of expertise</dt>
+                  <dd className="text-sm text-muted-foreground">No file on record (submitted before uploads were saved).</dd>
+                </div>
+              )}
             </dl>
 
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">

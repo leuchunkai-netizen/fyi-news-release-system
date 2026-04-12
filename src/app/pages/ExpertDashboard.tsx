@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router";
+import { useState, useEffect, useCallback } from "react";
+import { Link, useLocation } from "react-router";
 import { CheckCircle, XCircle, AlertTriangle, Eye, Star, Plus, Trash2, Pencil, ExternalLink } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import {
@@ -41,6 +41,7 @@ function claimForSourcePrecheck(article: ExpertDashboardArticle, comments: strin
 
 export function ExpertDashboard() {
   const { user } = useUser();
+  const location = useLocation();
   const [articles, setArticles] = useState<ExpertDashboardArticle[]>([]);
   const [listFilter, setListFilter] = useState<"all" | "needs_review" | "reviewed">("all");
   const [loading, setLoading] = useState(true);
@@ -70,18 +71,26 @@ export function ExpertDashboard() {
   const [viewArticleTitle, setViewArticleTitle] = useState("");
   const [deletingArticleId, setDeletingArticleId] = useState<string | null>(null);
 
-  const loadArticles = () => {
+  const loadArticles = useCallback(() => {
     if (!user || user.role !== "expert") return;
     setLoading(true);
     getExpertDashboardArticles(user.id)
       .then(setArticles)
       .catch(() => setArticles([]))
       .finally(() => setLoading(false));
-  };
+  }, [user?.id, user?.role]);
 
   useEffect(() => {
     loadArticles();
-  }, [user?.id]);
+  }, [loadArticles, location.pathname]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") loadArticles();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [loadArticles]);
 
   useEffect(() => {
     if (!reviewSourcePrecheck) return;
@@ -746,11 +755,14 @@ export function ExpertDashboard() {
                   <p className="text-slate-800 whitespace-pre-wrap">{viewReview.comments}</p>
                 </div>
               ) : null}
-              {expertReviewStoredVerifications(viewReview).length > 0 ? (
+              {expertReviewStoredVerifications(viewReview).filter((s) => String(s.aiVerdict).toUpperCase() === "SUPPORT")
+                .length > 0 ? (
                 <div>
                   <p className="text-xs font-medium text-muted-foreground mb-2">Sources</p>
                   <ul className="space-y-2">
-                    {expertReviewStoredVerifications(viewReview).map((s, i) => (
+                    {expertReviewStoredVerifications(viewReview)
+                      .filter((s) => String(s.aiVerdict).toUpperCase() === "SUPPORT")
+                      .map((s, i) => (
                       <li key={i} className="border rounded-lg p-2 text-xs break-all">
                         <a href={s.url} className="text-red-600 hover:underline font-medium" target="_blank" rel="noopener noreferrer">
                           {s.sourceTitle || s.url}

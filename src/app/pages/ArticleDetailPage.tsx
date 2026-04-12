@@ -65,6 +65,41 @@ function asStringArray(v: unknown): string[] {
   return [];
 }
 
+type CredibilityEvidenceItem = { title: string; source: string; desc: string; link?: string };
+
+function parseEvidenceSnippets(raw: unknown): CredibilityEvidenceItem[] {
+  if (raw == null) return [];
+  let data: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      data = JSON.parse(raw) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(data)) return [];
+  const out: CredibilityEvidenceItem[] = [];
+  for (const x of data) {
+    if (!x || typeof x !== "object") continue;
+    const o = x as Record<string, unknown>;
+    const descRaw = o.desc;
+    const desc =
+      typeof descRaw === "string"
+        ? descRaw
+        : descRaw != null
+          ? String(descRaw)
+          : "";
+    const item: CredibilityEvidenceItem = {
+      title: String(o.title ?? ""),
+      source: String(o.source ?? ""),
+      desc,
+    };
+    if (typeof o.link === "string" && o.link.trim()) item.link = o.link.trim();
+    out.push(item);
+  }
+  return out;
+}
+
 function buildSampleRejectionFindings(content: string, concerns: string[], warnings: string[]): RejectionFinding[] {
   const plain = stripHtml(content);
   const sentences = (plain.match(/[^.!?]+[.!?]?/g) ?? [])
@@ -89,6 +124,21 @@ function buildSampleRejectionFindings(content: string, concerns: string[], warni
   });
 }
 
+/** AI credibility UI: show only sources that SUPPORT the claim. */
+function isSupportSourceVerdict(aiVerdict: string | undefined): boolean {
+  return String(aiVerdict ?? "").toUpperCase() === "SUPPORT";
+}
+
+/** Strip legacy saved lines for UNRELATED / CONTRADICT user sources from strengths/concerns. */
+function filterNonSupportCredibilityLines(lines: string[]): string[] {
+  return lines.filter((line) => {
+    const t = line.trim();
+    if (/^\s*UNRELATED\s*\(/i.test(t)) return false;
+    if (/^\s*CONTRADICT\s*\(/i.test(t)) return false;
+    return true;
+  });
+}
+
 function displaySourcesForComment(c: CommentWithAuthor): CommentSourceVerification[] {
   const refs = (c as { source_references?: unknown }).source_references;
   if (Array.isArray(refs) && refs.length > 0) {
@@ -105,15 +155,17 @@ function displaySourcesForComment(c: CommentWithAuthor): CommentSourceVerificati
         });
       }
     }
-    if (out.length > 0) return out;
+    if (out.length > 0) return out.filter((row) => isSupportSourceVerdict(row.aiVerdict));
   }
   if (c.source_url) {
+    const v = c.source_ai_verdict ?? "—";
+    if (!isSupportSourceVerdict(typeof v === "string" ? v : undefined)) return [];
     return [
       {
         url: c.source_url,
         sourceTitle: c.source_title ?? "",
         sourceCredibility: c.source_credibility ?? "—",
-        aiVerdict: c.source_ai_verdict ?? "—",
+        aiVerdict: typeof v === "string" ? v : "—",
         reason: c.source_check_reason ?? "",
       },
     ];
@@ -137,15 +189,17 @@ function displaySourcesForExpertReview(review: ExpertReviewRow): CommentSourceVe
         });
       }
     }
-    if (out.length > 0) return out;
+    if (out.length > 0) return out.filter((row) => isSupportSourceVerdict(row.aiVerdict));
   }
   if (review.source_url) {
+    const v = review.source_ai_verdict ?? "—";
+    if (!isSupportSourceVerdict(typeof v === "string" ? v : undefined)) return [];
     return [
       {
         url: review.source_url,
         sourceTitle: review.source_title ?? "",
         sourceCredibility: review.source_credibility ?? "—",
-        aiVerdict: review.source_ai_verdict ?? "—",
+        aiVerdict: typeof v === "string" ? v : "—",
         reason: review.source_check_reason ?? "",
       },
     ];
@@ -562,9 +616,14 @@ export function ArticleDetailPage() {
       }
     : null;
 
-  const strengths = hasDbAnalysis ? asStringArray(credibilityAnalysis.strengths) : [];
-  const concerns = hasDbAnalysis ? asStringArray(credibilityAnalysis.concerns) : [];
+  const strengths = hasDbAnalysis ? filterNonSupportCredibilityLines(asStringArray(credibilityAnalysis.strengths)) : [];
+  const concerns = hasDbAnalysis ? filterNonSupportCredibilityLines(asStringArray(credibilityAnalysis.concerns)) : [];
   const warnings = hasDbAnalysis ? asStringArray(credibilityAnalysis.warnings) : [];
+  const evidenceSnippets = hasDbAnalysis
+    ? parseEvidenceSnippets(
+        (credibilityAnalysis as { evidence_snippets?: unknown } | null)?.evidence_snippets
+      )
+    : [];
 
   /** Show blue (expert) + green (AI) when both apply; otherwise one tick or Info. */
   const credibilityScoreIcon =
@@ -842,11 +901,18 @@ export function ArticleDetailPage() {
           </div>
         )}
 
-        {article.image_url && (
-          <div className="mb-8 rounded-lg overflow-hidden">
+        {article.image_url ? (
+          <figure className="mb-8 rounded-lg overflow-hidden border border-gray-100 bg-gray-50/50">
             <img src={article.image_url} alt={article.title} className="w-full" />
-          </div>
-        )}
+            {article.excerpt?.trim() ? (
+              <figcaption className="px-4 py-3 text-sm text-muted-foreground text-center border-t border-gray-100 bg-white">
+                {article.excerpt.trim()}
+              </figcaption>
+            ) : null}
+          </figure>
+        ) : article.excerpt?.trim() ? (
+          <p className="mb-8 text-sm text-muted-foreground text-center italic px-2">{article.excerpt.trim()}</p>
+        ) : null}
 
         {article.status === "rejected" && (
           <div className="mb-8 border-2 border-red-200 rounded-lg overflow-hidden">
@@ -953,6 +1019,44 @@ export function ArticleDetailPage() {
                   </div>
                 ))}
               </div>
+              {evidenceSnippets.length > 0 && (
+                <div>
+                  <h4 className="font-semibold text-sm mb-2">Evidence snippets used</h4>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Retrieved news evidence referenced by the automated fact-check for this article.
+                  </p>
+                  <ul className="space-y-2 border-t border-gray-200 pt-3">
+                    {evidenceSnippets.map((e, i) => (
+                      <li key={i} className="text-xs text-muted-foreground">
+                        {e.link ? (
+                          <a
+                            href={e.link}
+                            className="text-slate-800 font-medium hover:text-red-600 hover:underline"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {e.title || e.link}
+                          </a>
+                        ) : (
+                          <span className="text-slate-800 font-medium">{e.title}</span>
+                        )}
+                        {e.source ? (
+                          <span>
+                            {" "}
+                            <span className="text-muted-foreground">({e.source})</span>
+                          </span>
+                        ) : null}
+                        {e.desc ? (
+                          <span className="block mt-0.5">
+                            {e.desc.slice(0, 280)}
+                            {e.desc.length > 280 ? "…" : ""}
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {strengths.length > 0 && (
                 <div>
                   <h4 className="font-semibold text-sm text-green-700 mb-2">✓ Strengths:</h4>
