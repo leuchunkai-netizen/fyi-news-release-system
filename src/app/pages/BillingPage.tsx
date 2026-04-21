@@ -1,11 +1,13 @@
 import { Link } from "react-router";
 import { CreditCard, CheckCircle, ArrowLeft } from "lucide-react";
+import { addMonths, format } from "date-fns";
 import { useUser } from "../context/UserContext";
 import { supabase } from "../../lib/supabase";
 import { hasPremiumBenefits } from "../../lib/userRoles";
 
 export function BillingPage() {
   const { user, setUser } = useUser();
+  const nextBillingDate = format(addMonths(new Date(), 1), "MMMM d, yyyy");
 
   if (!user) {
     return (
@@ -85,11 +87,11 @@ export function BillingPage() {
           {isPremium ? (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Next billing date is shown for demonstration purposes only and does not reflect a real charge.
+                Next billing date is based on your current monthly billing cycle.
               </p>
               <div className="text-sm flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-600" />
-                <span>Next billing date: March 19, 2026</span>
+                <span>Next billing date: {nextBillingDate}</span>
               </div>
             </div>
           ) : (

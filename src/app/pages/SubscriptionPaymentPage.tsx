@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { CreditCard, Lock, ArrowLeft } from "lucide-react";
+import { Lock, ArrowLeft } from "lucide-react";
 import { useUser } from "../context/UserContext";
-import { upgradeToPremium, getCurrentUserWithInterests } from "../../lib/api/auth";
+import { getCurrentUserWithInterests } from "../../lib/api/auth";
+import { confirmStripeCheckout, createStripeCheckoutSession } from "../../lib/api/payments";
 
 function profileToUser(
   profile: {
@@ -30,17 +31,6 @@ function profileToUser(
   };
 }
 
-function formatCardNumber(value: string): string {
-  const v = value.replace(/\D/g, "").slice(0, 16);
-  return v.replace(/(.{4})/g, "$1 ").trim();
-}
-
-function formatExpiry(value: string): string {
-  const v = value.replace(/\D/g, "").slice(0, 4);
-  if (v.length >= 2) return v.slice(0, 2) + "/" + v.slice(2);
-  return v;
-}
-
 export function SubscriptionPaymentPage() {
   const { user, setUser } = useUser();
   const navigate = useNavigate();
@@ -51,15 +41,46 @@ export function SubscriptionPaymentPage() {
   const planLabel =
     plan === "yearly" ? "Premium (Yearly) · $59.88/year (equiv. $4.99/month)" : "Premium · $9.99/month";
   const ctaLabel = plan === "yearly" ? "Subscribe — $59.88/year" : "Subscribe — $9.99/month";
-  const [form, setForm] = useState({
-    cardNumber: "",
-    expiry: "",
-    cvc: "",
-    nameOnCard: "",
-    billingZip: "",
-  });
   const [submitting, setSubmitting] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const checkoutSuccess = searchParams.get("checkout_success") === "1";
+  const checkoutCancelled = searchParams.get("checkout_cancelled") === "1";
+  const stripeSessionId = searchParams.get("session_id");
+  const isFinishing = checkoutSuccess && Boolean(stripeSessionId);
+  const actionButtonLabel = useMemo(() => {
+    if (isUpdateMode) return "Update payment method in Stripe";
+    return ctaLabel;
+  }, [isUpdateMode, ctaLabel]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (user.role !== "free" && !isUpdateMode) {
+      navigate("/subscription", { replace: true });
+    }
+  }, [isUpdateMode, navigate, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!isFinishing || !stripeSessionId || finalizing) return;
+
+    const run = async () => {
+      setError(null);
+      setFinalizing(true);
+      try {
+        await confirmStripeCheckout(stripeSessionId);
+        const data = await getCurrentUserWithInterests();
+        if (data) setUser(profileToUser(data.profile, data.interests));
+        navigate("/subscription?success=1", { replace: true });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to confirm your Stripe payment.");
+      } finally {
+        setFinalizing(false);
+      }
+    };
+
+    void run();
+  }, [finalizing, isFinishing, navigate, setUser, stripeSessionId, user]);
 
   if (!user) {
     return (
@@ -94,57 +115,15 @@ export function SubscriptionPaymentPage() {
     );
   }
 
-  if (user.role !== "free" && !isUpdateMode) {
-    navigate("/subscription", { replace: true });
-    return null;
-  }
-
-  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm((prev) => ({ ...prev, cardNumber: formatCardNumber(e.target.value) }));
-  };
-  const handleExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm((prev) => ({ ...prev, expiry: formatExpiry(e.target.value) }));
-  };
-  const handleCvcChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = e.target.value.replace(/\D/g, "").slice(0, 4);
-    setForm((prev) => ({ ...prev, cvc: v }));
-  };
-
-  const validate = (): string | null => {
-    const digits = form.cardNumber.replace(/\D/g, "");
-    if (digits.length < 13 || digits.length > 19) return "Enter a valid card number.";
-    if (!/^\d{2}\/\d{2}$/.test(form.expiry)) return "Enter expiry as MM/YY.";
-    const [mm, yy] = form.expiry.split("/").map(Number);
-    if (mm < 1 || mm > 12) return "Enter a valid expiry month.";
-    const now = new Date();
-    const year = 2000 + yy;
-    if (year < now.getFullYear() || (year === now.getFullYear() && mm < now.getMonth() + 1)) {
-      return "Card has expired.";
-    }
-    if (form.cvc.length < 3) return "Enter a valid CVC.";
-    if (!form.nameOnCard.trim()) return "Enter the name on card.";
-    return null;
-  };
+  if (user.role !== "free" && !isUpdateMode) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    const err = validate();
-    if (err) {
-      setError(err);
-      return;
-    }
     setSubmitting(true);
     try {
-      if (isUpdateMode) {
-        await new Promise((r) => setTimeout(r, 600));
-        navigate("/profile?payment_updated=1", { replace: true });
-      } else {
-        await upgradeToPremium(user.id);
-        const data = await getCurrentUserWithInterests();
-        if (data) setUser(profileToUser(data.profile, data.interests));
-        navigate("/subscription?success=1", { replace: true });
-      }
+      const checkoutUrl = await createStripeCheckoutSession(plan);
+      window.location.assign(checkoutUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Payment failed. Please try again.");
     } finally {
@@ -172,7 +151,7 @@ export function SubscriptionPaymentPage() {
           </p>
           <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
             <Lock className="w-4 h-4" />
-            Secure payment
+            Secure payment with Stripe Checkout (test mode)
           </div>
         </div>
 
@@ -182,86 +161,28 @@ export function SubscriptionPaymentPage() {
               {error}
             </div>
           )}
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Card number</label>
-            <div className="relative">
-              <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                inputMode="numeric"
-                autoComplete="cc-number"
-                placeholder="1234 5678 9012 3456"
-                value={form.cardNumber}
-                onChange={handleCardNumberChange}
-                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
-              />
+          {checkoutCancelled && (
+            <div className="p-3 rounded-lg bg-amber-50 text-amber-800 text-sm border border-amber-200">
+              Stripe checkout was cancelled. No payment was made.
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">Expiry (MM/YY)</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                autoComplete="cc-exp"
-                placeholder="MM/YY"
-                value={form.expiry}
-                onChange={handleExpiryChange}
-                className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
-              />
+          )}
+          {isFinishing && (
+            <div className="p-3 rounded-lg bg-blue-50 text-blue-800 text-sm border border-blue-200">
+              Confirming your Stripe payment...
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">CVC</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                autoComplete="cc-csc"
-                placeholder="123"
-                value={form.cvc}
-                onChange={handleCvcChange}
-                className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Name on card</label>
-            <input
-              type="text"
-              autoComplete="cc-name"
-              placeholder="John Doe"
-              value={form.nameOnCard}
-              onChange={(e) => setForm((prev) => ({ ...prev, nameOnCard: e.target.value }))}
-              className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Billing ZIP (optional)</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              autoComplete="postal-code"
-              placeholder="12345"
-              value={form.billingZip}
-              onChange={(e) => setForm((prev) => ({ ...prev, billingZip: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
-              className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600"
-            />
-          </div>
+          )}
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || finalizing}
             className="w-full py-3 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? "Processing…" : isUpdateMode ? "Update payment method" : ctaLabel}
+            {submitting ? "Redirecting to Stripe..." : finalizing ? "Finalizing..." : actionButtonLabel}
           </button>
 
           <p className="text-xs text-muted-foreground text-center">
             {isUpdateMode
-              ? "Your new card will be used for future payments."
+              ? "You will be redirected to Stripe test checkout to update billing details."
               : "By subscribing you agree to our terms. You can cancel anytime from your profile."}
           </p>
         </form>

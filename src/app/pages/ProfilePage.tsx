@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Shield, Upload as UploadIcon, CheckCircle } from "lucide-react";
+import { addMonths, format } from "date-fns";
 import { useUser } from "../context/UserContext";
 import { Link, useLocation } from "react-router";
 import { upsertUserProfile, getCurrentUserWithInterests } from "../../lib/api/auth";
@@ -16,6 +17,7 @@ import { hasPremiumBenefits } from "../../lib/userRoles";
 export function ProfilePage() {
   const { user, setUser } = useUser();
   const location = useLocation();
+  const nextBillingDate = format(addMonths(new Date(), 1), "MMMM d, yyyy");
   const [isEditing, setIsEditing] = useState(false);
   const [showExpertApplication, setShowExpertApplication] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -584,7 +586,7 @@ export function ProfilePage() {
                     </span>
                   </div>
                   <div className="border-t pt-4">
-                    <p className="text-sm text-muted-foreground mb-2">Next billing date: March 19, 2026</p>
+                    <p className="text-sm text-muted-foreground mb-2">Next billing date: {nextBillingDate}</p>
                     <div className="flex gap-2">
                       <Link
                         to="/subscription/checkout?update=1"
@@ -738,7 +740,7 @@ export function ProfilePage() {
                 <li>Priority customer support</li>
               </ul>
               <p className="text-sm text-muted-foreground mb-6">
-                Your premium access will continue until <strong>March 19, 2026</strong>.
+                Your premium access will continue until <strong>{nextBillingDate}</strong>.
               </p>
               <div className="flex gap-4">
                 <button
