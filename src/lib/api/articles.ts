@@ -1,5 +1,6 @@
 import { supabase } from "../supabase";
 import type { ArticleRow, ArticleStatus, ExpertReviewRow } from "../types/database";
+import { apiUrl } from "./apiBase";
 
 export interface ArticleWithCategory extends ArticleRow {
   category?: { name: string; slug: string } | null;
@@ -17,6 +18,11 @@ export interface TrendingArticleItem {
   publishedAt: string | null;
 }
 
+export type SuggestedTagsResult = {
+  tags: string[];
+  source: "openai" | "huggingface" | "extract";
+};
+
 /** Normalize tags from DB array or comma-separated string (upload form). */
 export function normalizeArticleTags(input: string | string[] | null | undefined): string[] {
   if (Array.isArray(input)) {
@@ -26,6 +32,32 @@ export function normalizeArticleTags(input: string | string[] | null | undefined
     return normalizeArticleTags(input.split(","));
   }
   return [];
+}
+
+export async function suggestArticleTags(params: {
+  title?: string;
+  content: string;
+}): Promise<SuggestedTagsResult> {
+  const res = await fetch(apiUrl("/api/articles/tags"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg =
+      data && typeof data === "object" && "error" in (data as object)
+        ? String((data as { error: unknown }).error)
+        : `Request failed: ${res.status}`;
+    throw new Error(msg);
+  }
+  const tags = normalizeArticleTags((data as { tags?: unknown })?.tags as string[] | undefined);
+  const sourceRaw = String((data as { source?: unknown })?.source || "extract").toLowerCase();
+  const source: SuggestedTagsResult["source"] =
+    sourceRaw === "openai" || sourceRaw === "huggingface" || sourceRaw === "extract"
+      ? sourceRaw
+      : "extract";
+  return { tags, source };
 }
 
 function tagOverlapCount(a: string[], b: string[]): number {
@@ -54,6 +86,7 @@ async function getArticleIdsWithCredibilityAnalysis(articleIds: string[]): Promi
 /** Fetch published articles (home, search). Optional: filter by category slug, text search, limit, offset. */
 export async function getPublishedArticles(options?: {
   categorySlug?: string;
+  tag?: string;
   q?: string;
   limit?: number;
   offset?: number;
@@ -71,6 +104,11 @@ export async function getPublishedArticles(options?: {
   if (options?.categorySlug && options.categorySlug !== "all") {
     const { data: cat } = await supabase.from("categories").select("id").eq("slug", options.categorySlug).maybeSingle();
     if (cat) query = query.eq("category_id", cat.id);
+  }
+
+  if (options?.tag?.trim()) {
+    const normalizedTag = options.tag.trim().toLowerCase();
+    query = query.contains("tags", [normalizedTag]);
   }
 
   if (options?.q?.trim()) {

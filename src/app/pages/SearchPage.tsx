@@ -5,6 +5,7 @@ import { getCategories, getPublishedArticles } from "@/lib/api";
 import { previewTextFromArticle } from "@/lib/articlePreview";
 import type { ArticleWithCategory } from "@/lib/api/articles";
 import type { CategoryRow } from "@/lib/types/database";
+import { useParams } from "react-router";
 const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1622223145461-271074da3e20?w=1080";
 
 function formatTimeAgoPrecise(iso: string | null): string {
@@ -34,6 +35,7 @@ function mapArticleToCard(a: ArticleWithCategory) {
     time: formatTimeAgoPrecise(a.published_at ?? a.created_at),
     views: a.views ?? 0,
     commentsCount: a.commentsCount ?? 0,
+    tags: a.tags ?? [],
     credibilityScore: a.credibility_score ?? undefined,
     isVerified: a.is_verified,
     hasAiCredibility: a.hasCredibilityAnalysis === true,
@@ -41,6 +43,8 @@ function mapArticleToCard(a: ArticleWithCategory) {
 }
 
 export function SearchPage() {
+  const { tag: routeTag } = useParams<{ tag?: string }>();
+  const activeTag = routeTag ? decodeURIComponent(routeTag).trim().toLowerCase() : "";
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [categories, setCategories] = useState<CategoryRow[]>([]);
@@ -54,6 +58,7 @@ export function SearchPage() {
     try {
       const list = await getPublishedArticles({
         categorySlug: selectedCategory === "all" ? undefined : selectedCategory,
+        tag: activeTag || undefined,
         q: searchQuery.trim() || undefined,
         limit: 50,
       });
@@ -63,7 +68,7 @@ export function SearchPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, selectedCategory]);
+  }, [searchQuery, selectedCategory, activeTag]);
 
   useEffect(() => {
     getCategories().then(setCategories).catch(() => setCategories([]));
@@ -71,7 +76,7 @@ export function SearchPage() {
 
   useEffect(() => {
     runSearch();
-  }, [selectedCategory]);
+  }, [selectedCategory, activeTag]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,7 +86,9 @@ export function SearchPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-semibold mb-8">Search Articles</h1>
+        <h1 className="text-3xl font-semibold mb-8">
+          {activeTag ? `Tag: #${activeTag}` : "Search Articles"}
+        </h1>
 
         <form onSubmit={handleSubmit} className="mb-8">
           <div className="relative">
@@ -90,7 +97,11 @@ export function SearchPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search for articles, topics, or authors..."
+              placeholder={
+                activeTag
+                  ? `Search within #${activeTag} posts...`
+                  : "Search for articles, topics, or authors..."
+              }
               className="w-full pl-12 pr-4 py-4 border rounded-lg text-lg focus:outline-none focus:ring-2 focus:ring-red-600"
             />
             <button

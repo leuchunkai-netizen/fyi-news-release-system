@@ -45,6 +45,7 @@ function mapArticleToCard(a: ArticleWithCategory) {
     time: formatTimeAgoPrecise(a.published_at ?? a.created_at),
     views: a.views ?? 0,
     commentsCount: a.commentsCount ?? 0,
+    tags: a.tags ?? [],
     credibilityScore: a.credibility_score ?? undefined,
     isVerified: a.is_verified,
     hasAiCredibility: a.hasCredibilityAnalysis === true,

@@ -22,6 +22,9 @@ router.post("/factcheck", heavyLimiter, requireJson, articleController.factcheck
 /** POST /api/articles/summary — OpenAI / HF summary from article HTML/text (rate-limited). */
 router.post("/summary", heavyLimiter, requireJson, articleController.summarize);
 
+/** POST /api/articles/tags — OpenAI / HF related tags from title + content (rate-limited). */
+router.post("/tags", heavyLimiter, requireJson, articleController.suggestTags);
+
 /** POST /api/articles/submit-review — fact-check + optional auto-publish (rate-limited, requires Bearer token). */
 router.post("/submit-review", heavyLimiter, requireJson, articleController.submitForReview);
 

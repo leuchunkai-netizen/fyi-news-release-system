@@ -1,5 +1,6 @@
 const { runFactcheckPipeline } = require("../services/articlePipeline");
 const { generateArticleSummary, summaryContentHash } = require("../services/articleSummary");
+const { generateArticleTags } = require("../services/articleTags");
 const articleQueries = require("../db/articleQueries");
 const { upsertCredibilityFromFactcheck } = require("../db/credibilityQueries");
 const { getSupabaseAdmin } = require("../db/supabaseClient");
@@ -170,6 +171,22 @@ async function summarize(req, res) {
 }
 
 /**
+ * POST /api/articles/tags — auto-generate related tags from title + body.
+ */
+async function suggestTags(req, res) {
+  try {
+    const { title, content } = req.body || {};
+    if (content == null || String(content).trim().length === 0) {
+      return res.status(400).json({ error: "Missing content. Add article text before generating tags." });
+    }
+    const result = await generateArticleTags({ title, content });
+    return res.json(result);
+  } catch (e) {
+    return res.status(500).json({ error: e.message || "Tag generation failed" });
+  }
+}
+
+/**
  * POST /api/articles/submit-review
  * After the client saves the article as pending, call this with the same title/body.
  * Runs the fact-check pipeline; if verdict + confidence pass env thresholds, publishes automatically.
@@ -240,9 +257,12 @@ async function submitForReview(req, res) {
     // User source checks can only boost confidence; contradicting sources still affect verdict below, not the score.
     let confidence = baseConfidence + Math.min(15, supportHigh * 5) + Math.min(6, supportLow * 2);
     confidence = Math.max(0, Math.min(100, confidence));
+    const verifiedScoreThreshold = 75;
     let verdict = baseVerdict;
     if (contradicts > 0) {
       verdict = "REJECTED";
+    } else if (confidence >= verifiedScoreThreshold) {
+      verdict = "VERIFIED";
     } else if (supportHigh >= 2) {
       verdict = "VERIFIED";
     } else if ((supportHigh > 0 || supportLow > 0) && verdict === "REJECTED") {
@@ -342,6 +362,7 @@ module.exports = {
   listArticles,
   factcheck,
   summarize,
+  suggestTags,
   submitForReview,
   verifyClaimSource,
 };

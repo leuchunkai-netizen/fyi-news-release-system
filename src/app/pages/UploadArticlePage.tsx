@@ -4,7 +4,13 @@ import { AlertTriangle, ClipboardCheck, Upload, X } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import { factcheckArticle, verifyClaimSource, type ClaimSourceVerifyResult, type FactcheckResult } from "../../lib/api/factcheck";
 import { evaluateSubmitForReview } from "../../lib/api/submitReview";
-import { createArticle, getArticleById, normalizeArticleTags, updateArticle } from "../../lib/api/articles";
+import {
+  createArticle,
+  getArticleById,
+  normalizeArticleTags,
+  suggestArticleTags,
+  updateArticle,
+} from "../../lib/api/articles";
 import { getCategories } from "../../lib/api/categories";
 import { uploadArticleImage } from "../../lib/storage";
 import type { CategoryRow } from "../../lib/types/database";
@@ -17,6 +23,20 @@ interface RejectionFinding {
 }
 
 type ClaimSignal = { verdict: "SUPPORT" | "CONTRADICT" | "UNRELATED"; credibility: "HIGH" | "LOW" };
+
+const CATEGORY_HINT_KEYWORDS: Record<string, string[]> = {
+  "world-news": ["world", "global", "international", "country", "countries", "nation", "diplomatic", "conflict", "war"],
+  politics: ["politics", "government", "policy", "election", "parliament", "minister", "senate", "lawmakers"],
+  business: ["business", "market", "stocks", "economy", "economic", "finance", "trade", "industry", "investor"],
+  technology: ["technology", "tech", "software", "ai", "artificial intelligence", "startup", "cybersecurity", "digital"],
+  science: ["science", "scientist", "research", "study", "laboratory", "experiment", "discovery"],
+  health: ["health", "medical", "medicine", "hospital", "doctor", "disease", "treatment", "clinical"],
+  sports: ["sports", "match", "tournament", "league", "coach", "player", "goal", "championship"],
+  entertainment: ["entertainment", "movie", "film", "music", "celebrity", "show", "series", "festival"],
+  culture: ["culture", "art", "museum", "heritage", "literature", "theater", "tradition"],
+  environment: ["environment", "climate", "emissions", "pollution", "wildlife", "sustainability", "renewable"],
+  "breaking-news": ["breaking", "urgent", "developing", "just in", "latest"],
+};
 
 /** Bonus points from user-verified sources only; never reduces base pipeline confidence. */
 function estimateSourceDelta(rows: ClaimSourceVerifyResult[]) {
@@ -45,6 +65,58 @@ function computeScoreBreakdown(
 
 function stripHtml(input: string): string {
   return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function normalizeForTokens(input: string): string[] {
+  return String(input || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3);
+}
+
+function countKeywordHits(text: string, keywords: string[]) {
+  const lower = text.toLowerCase();
+  return keywords.reduce((hits, kw) => {
+    const word = kw.trim().toLowerCase();
+    if (!word) return hits;
+    return lower.includes(word) ? hits + 1 : hits;
+  }, 0);
+}
+
+function getCategoryMismatchMessage(
+  selectedSlug: string,
+  title: string,
+  content: string,
+  categories: CategoryRow[]
+): string | null {
+  const selected = categories.find((c) => c.slug === selectedSlug);
+  if (!selected) return "Please select a valid category.";
+  const text = `${title}\n${stripHtml(content)}`.trim();
+  if (!text) return null;
+
+  const ranked = categories
+    .map((c) => {
+      const fromNameAndDescription = [...normalizeForTokens(`${c.name} ${c.description ?? ""}`)];
+      const hints = CATEGORY_HINT_KEYWORDS[c.slug] ?? [];
+      const keywords = Array.from(new Set([...fromNameAndDescription, ...hints]));
+      return {
+        slug: c.slug,
+        name: c.name,
+        score: countKeywordHits(text, keywords),
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const selectedScore = ranked.find((r) => r.slug === selectedSlug)?.score ?? 0;
+  const best = ranked[0];
+  if (!best || best.slug === selectedSlug) return null;
+  const scoreGap = best.score - selectedScore;
+  // Stricter gate: if a different category has a clear lead, block mismatch.
+  const clearlyDifferent = best.score >= 2 && scoreGap >= 2;
+  if (!clearlyDifferent) return null;
+  return `This draft looks closer to "${best.name}" than "${selected.name}". Please choose a matching category.`;
 }
 
 function getSampleRejectionFindings(content: string, rejectionReason: string): RejectionFinding[] {
@@ -96,6 +168,9 @@ export function UploadArticlePage() {
   const [factcheckLoading, setFactcheckLoading] = useState(false);
   const [factcheckError, setFactcheckError] = useState<string | null>(null);
   const [factcheckResult, setFactcheckResult] = useState<FactcheckResult | null>(null);
+  const [tagSuggestLoading, setTagSuggestLoading] = useState(false);
+  const [tagSuggestError, setTagSuggestError] = useState<string | null>(null);
+  const [tagSuggestSource, setTagSuggestSource] = useState<"openai" | "huggingface" | "extract" | null>(null);
   const [claimSourceUrls, setClaimSourceUrls] = useState<Record<number, string>>({});
   const [claimVerifyLoading, setClaimVerifyLoading] = useState<Record<number, boolean>>({});
   const [claimVerifyErrors, setClaimVerifyErrors] = useState<Record<number, string>>({});
@@ -105,6 +180,13 @@ export function UploadArticlePage() {
     () => computeScoreBreakdown(factcheckResult, claimVerifyResults),
     [factcheckResult, claimVerifyResults]
   );
+  const liveCategoryMismatch = useMemo(() => {
+    const title = formData.title.trim();
+    const categorySlug = formData.category.trim();
+    const body = stripHtml(formData.content);
+    if (!categorySlug || !title || body.length < 80) return null;
+    return getCategoryMismatchMessage(categorySlug, title, formData.content, categories);
+  }, [formData.title, formData.category, formData.content, categories]);
 
   useEffect(() => {
     getCategories().then(setCategories).catch(() => setCategories([]));
@@ -177,10 +259,24 @@ export function UploadArticlePage() {
   const handleRunFactcheck = async () => {
     setFactcheckError(null);
     const title = formData.title.trim();
+    if (!title) {
+      setFactcheckError("Add an article title before running a fact check.");
+      return;
+    }
+    const categorySlug = formData.category.trim();
+    const category = categorySlug ? categories.find((c) => c.slug === categorySlug) : null;
+    if (!category) {
+      setFactcheckError("Select a valid category before running a fact check.");
+      return;
+    }
+    const mismatch = getCategoryMismatchMessage(categorySlug, title, formData.content, categories);
+    if (mismatch) {
+      setFactcheckError(mismatch);
+      return;
+    }
     const body = stripHtml(formData.content);
-    const combined = [title, body].filter(Boolean).join("\n\n").trim();
-    if (combined.length < 80) {
-      setFactcheckError("Add a title and article text (at least 80 characters total) before running a fact check.");
+    if (body.length < 80) {
+      setFactcheckError("Add article text (at least 80 characters) before running a fact check.");
       return;
     }
     setFactcheckLoading(true);
@@ -237,6 +333,31 @@ export function UploadArticlePage() {
     }
   };
 
+  const handleSuggestTags = async () => {
+    setTagSuggestError(null);
+    const title = formData.title.trim();
+    const content = formData.content.trim();
+    const body = stripHtml(content);
+    if (body.length < 40) {
+      setTagSuggestError("Add article content (at least 40 characters) before generating tags.");
+      return;
+    }
+    setTagSuggestLoading(true);
+    try {
+      const result = await suggestArticleTags({ title: title || undefined, content });
+      if (!result.tags.length) {
+        setTagSuggestError("No tag suggestions returned. Add more detail and try again.");
+        return;
+      }
+      setFormData((prev) => ({ ...prev, tags: result.tags.join(", ") }));
+      setTagSuggestSource(result.source);
+    } catch (err) {
+      setTagSuggestError(err instanceof Error ? err.message : "Tag generation failed.");
+    } finally {
+      setTagSuggestLoading(false);
+    }
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -274,6 +395,14 @@ export function UploadArticlePage() {
         setError("Please select a category before submitting for review.");
         setSubmitting(false);
         return;
+      }
+      if (!isDraft && categorySlug) {
+        const mismatch = getCategoryMismatchMessage(categorySlug, title, formData.content, categories);
+        if (mismatch) {
+          setError(mismatch);
+          setSubmitting(false);
+          return;
+        }
       }
 
       if (!isDraft && !formData.content.trim()) {
@@ -462,7 +591,17 @@ export function UploadArticlePage() {
 
           {/* Tags (comma-separated; used for “Also read” matching) */}
           <div>
-            <label className="block text-sm font-medium mb-2">Tags</label>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <label className="block text-sm font-medium">Tags</label>
+              <button
+                type="button"
+                onClick={handleSuggestTags}
+                disabled={tagSuggestLoading}
+                className="px-3 py-1.5 border rounded-md text-xs hover:bg-gray-50 disabled:opacity-50"
+              >
+                {tagSuggestLoading ? "Generating tags..." : "Auto-generate tags"}
+              </button>
+            </div>
             <input
               type="text"
               value={formData.tags}
@@ -473,6 +612,10 @@ export function UploadArticlePage() {
             <p className="text-xs text-muted-foreground mt-1">
               Comma-separated. Helps readers find related stories in the same category.
             </p>
+            {tagSuggestError ? <p className="text-xs text-red-700 mt-1">{tagSuggestError}</p> : null}
+            {tagSuggestSource ? (
+              <p className="text-xs text-muted-foreground mt-1">Tag suggestions source: {tagSuggestSource}</p>
+            ) : null}
           </div>
 
           {/* Featured Image */}
@@ -548,7 +691,7 @@ export function UploadArticlePage() {
               <button
                 type="button"
                 onClick={handleRunFactcheck}
-                disabled={factcheckLoading}
+                disabled={factcheckLoading || Boolean(liveCategoryMismatch)}
                 className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 disabled:opacity-50 text-sm shrink-0"
               >
                 {factcheckLoading ? "Checking…" : "Run fact check"}
@@ -556,6 +699,11 @@ export function UploadArticlePage() {
             </div>
             {factcheckError && (
               <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2 mb-3">{factcheckError}</div>
+            )}
+            {liveCategoryMismatch && (
+              <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
+                {liveCategoryMismatch}
+              </div>
             )}
             {factcheckResult && (
               <div className="space-y-3 text-sm">

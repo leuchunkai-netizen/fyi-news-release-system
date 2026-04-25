@@ -695,6 +695,19 @@ export function ArticleDetailPage() {
           </div>
 
           <h1 className="text-4xl font-serif mb-4">{article.title}</h1>
+          {Array.isArray(article.tags) && article.tags.length > 0 && (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {article.tags.map((tag) => (
+                <Link
+                  key={tag}
+                  to={`/tag/${encodeURIComponent(tag)}`}
+                  className="text-xs border border-gray-300 bg-gray-50 rounded-full px-2.5 py-1 text-gray-700"
+                >
+                  #{tag}
+                </Link>
+              ))}
+            </div>
+          )}
 
           {credibilityInfo && primaryScore != null && (
             <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border ${credibilityInfo.borderColor} ${credibilityInfo.bgColor} mb-4`}>

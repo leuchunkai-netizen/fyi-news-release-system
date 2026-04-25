@@ -39,6 +39,7 @@ export const router = createBrowserRouter([
       { path: "expert-dashboard", Component: ExpertDashboard },
       { path: "admin", Component: AdminDashboard },
       { path: "search", Component: SearchPage },
+      { path: "tag/:tag", Component: SearchPage },
       { path: "bookmarks", Component: BookmarksPage },
       { path: "reading-history", Component: ReadingHistoryPage },
       { path: "offline-reading", Component: RedirectOfflineReadingToHistory },

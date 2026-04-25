@@ -155,6 +155,7 @@ export function ReadingHistoryPage() {
                     author={article.author_display_name ?? "Unknown"}
                     time={formatTimeAgo(article.published_at ?? article.created_at)}
                     views={article.views ?? 0}
+                    tags={article.tags ?? []}
                     credibilityScore={article.credibility_score ?? undefined}
                     isVerified={article.is_verified}
                   />

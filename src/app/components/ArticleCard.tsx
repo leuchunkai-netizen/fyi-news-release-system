@@ -17,6 +17,7 @@ interface ArticleCardProps {
   isVerified?: boolean;
   /** Saved AI / fact-check row in `article_credibility_analysis`. When true with `isVerified`, both ticks show. */
   hasAiCredibility?: boolean;
+  tags?: string[];
 }
 
 export function ArticleCard({ 
@@ -33,6 +34,7 @@ export function ArticleCard({
   credibilityScore,
   isVerified,
   hasAiCredibility,
+  tags,
 }: ArticleCardProps) {
   const { user } = useUser();
 
@@ -83,6 +85,19 @@ export function ArticleCard({
           <p className="text-[11px] text-muted-foreground mb-2 line-clamp-2">
             {excerpt}
           </p>
+          {Array.isArray(tags) && tags.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              {tags.slice(0, 3).map((tag) => (
+                <Link
+                  key={tag}
+                  to={`/tag/${encodeURIComponent(tag)}`}
+                  className="text-[10px] border border-gray-300 rounded-full px-1.5 py-0.5 text-gray-700 hover:bg-gray-100"
+                >
+                  #{tag}
+                </Link>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <span>By {author}</span>
             <span>•</span>
@@ -146,6 +161,19 @@ export function ArticleCard({
               {title}
             </h3>
           </Link>
+          {Array.isArray(tags) && tags.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              {tags.slice(0, 3).map((tag) => (
+                <Link
+                  key={tag}
+                  to={`/tag/${encodeURIComponent(tag)}`}
+                  className="text-[10px] border border-gray-300 rounded-full px-1.5 py-0.5 text-gray-700 hover:bg-gray-100"
+                >
+                  #{tag}
+                </Link>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>{author}</span>
             <span>•</span>
@@ -211,6 +239,19 @@ export function ArticleCard({
         <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
           {excerpt}
         </p>
+        {Array.isArray(tags) && tags.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {tags.slice(0, 4).map((tag) => (
+              <Link
+                key={tag}
+                to={`/tag/${encodeURIComponent(tag)}`}
+                className="text-[11px] border border-gray-300 rounded-full px-2 py-0.5 text-gray-700 hover:bg-gray-100"
+              >
+                #{tag}
+              </Link>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>By {author}</span>
           <span>•</span>
