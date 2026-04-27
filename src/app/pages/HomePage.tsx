@@ -5,12 +5,18 @@ import { Sidebar } from "../components/Sidebar";
 import { useUser } from "../context/UserContext";
 import { useGuestLanding } from "../context/GuestLandingContext";
 import { useTestimonials } from "../context/TestimonialsContext";
-import { getCategories, getPublishedArticles, getTrendingArticles } from "@/lib/api";
+import {
+  getBookmarkedArticles,
+  getCategories,
+  getPublishedArticles,
+  getReadingHistory,
+  getTrendingArticles,
+} from "@/lib/api";
 import { previewTextFromArticle } from "@/lib/articlePreview";
 import type { ArticleWithCategory, TrendingArticleItem } from "@/lib/api/articles";
 import type { CategoryRow } from "@/lib/types/database";
 import { Link, useParams } from "react-router";
-import { Star, Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { Star, Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 
 const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1622223145461-271074da3e20?w=1080";
 
@@ -51,6 +57,56 @@ function mapArticleToCard(a: ArticleWithCategory) {
     hasAiCredibility: a.hasCredibilityAnalysis === true,
     publishedAtTs: new Date(a.published_at ?? a.created_at).getTime(),
   };
+}
+
+type InterestSignal = {
+  key: string;
+  aliases: string[];
+  categories: string[];
+};
+
+type BehaviorEntry = {
+  article: Pick<ReturnType<typeof mapArticleToCard>, "title" | "excerpt" | "tags" | "category">;
+  weight: number;
+};
+
+const INTEREST_SIGNAL_DICTIONARY: InterestSignal[] = [
+  { key: "football", aliases: ["football", "soccer", "premier league", "fifa", "uefa", "champions league"], categories: ["sports"] },
+  { key: "basketball", aliases: ["basketball", "nba", "wnba"], categories: ["sports"] },
+  { key: "tennis", aliases: ["tennis", "atp", "wta", "grand slam"], categories: ["sports"] },
+  { key: "formula 1", aliases: ["formula 1", "f1", "grand prix"], categories: ["sports"] },
+  { key: "esports", aliases: ["esports", "e-sports", "gaming tournament"], categories: ["sports", "technology"] },
+  { key: "stocks", aliases: ["stock", "stocks", "nasdaq", "dow jones", "earnings"], categories: ["business"] },
+  { key: "crypto", aliases: ["crypto", "bitcoin", "ethereum", "blockchain"], categories: ["business", "technology"] },
+  { key: "ai", aliases: ["ai", "artificial intelligence", "machine learning", "llm", "openai"], categories: ["technology"] },
+  { key: "mobile", aliases: ["iphone", "android", "smartphone", "mobile"], categories: ["technology"] },
+  { key: "movies", aliases: ["movie", "cinema", "box office", "hollywood"], categories: ["entertainment"] },
+  { key: "music", aliases: ["music", "album", "concert", "spotify"], categories: ["entertainment"] },
+  { key: "travel", aliases: ["travel", "tourism", "flight", "destination"], categories: ["lifestyle"] },
+  { key: "fitness", aliases: ["fitness", "workout", "exercise", "gym"], categories: ["health", "lifestyle"] },
+  { key: "nutrition", aliases: ["nutrition", "diet", "healthy eating"], categories: ["health", "lifestyle"] },
+  { key: "world", aliases: ["world", "global", "international", "geopolitics", "foreign affairs"], categories: ["world"] },
+  { key: "politics", aliases: ["politics", "government", "election", "parliament", "policy"], categories: ["world", "business"] },
+];
+
+function inferBehaviorInterestScores(entries: BehaviorEntry[]) {
+  const scores = new Map<string, number>();
+
+  for (const entry of entries) {
+    const article = entry.article;
+    const weight = Math.max(0, entry.weight);
+    const text = `${article.title} ${article.excerpt} ${article.category}`.toLowerCase();
+    const tagTokens = (article.tags ?? []).map((tag) => String(tag).toLowerCase());
+    for (const signal of INTEREST_SIGNAL_DICTIONARY) {
+      const matchesAlias = signal.aliases.some((alias) => text.includes(alias));
+      const matchesTag = signal.aliases.some((alias) => tagTokens.some((tag) => tag.includes(alias)));
+      if (matchesAlias || matchesTag) {
+        const boost = ((matchesAlias ? 1 : 0) + (matchesTag ? 2 : 0)) * weight;
+        scores.set(signal.key, (scores.get(signal.key) ?? 0) + boost);
+      }
+    }
+  }
+  return scores;
 }
 
 function getYouTubeEmbedUrl(input: string): string {
@@ -98,6 +154,8 @@ export function HomePage() {
 
   const { user } = useUser();
   const isUnregisteredUser = !user || user.role === "guest";
+  const canUseInterestedSection =
+    !!user && (user.role === "premium" || user.role === "admin" || user.role === "expert");
   const { introSlides, videoSection } = useGuestLanding();
   const { approvedTestimonials } = useTestimonials();
 
@@ -108,6 +166,12 @@ export function HomePage() {
   >([]);
   const [allCategories, setAllCategories] = useState<CategoryRow[]>([]);
   const [forYouPage, setForYouPage] = useState(0);
+  const [interestedPage, setInterestedPage] = useState(0);
+  const [behaviorSignals, setBehaviorSignals] = useState<Map<string, number>>(new Map());
+  const [behaviorTagScores, setBehaviorTagScores] = useState<Map<string, number>>(new Map());
+  const [behaviorCategoryScores, setBehaviorCategoryScores] = useState<Map<string, number>>(new Map());
+  const [mutedInterests, setMutedInterests] = useState<string[]>([]);
+  const [hideInterestedSection, setHideInterestedSection] = useState(false);
   const [latestPage, setLatestPage] = useState(0);
   const [latestSort, setLatestSort] = useState<"recent" | "views" | "comments">("recent");
   const [loading, setLoading] = useState(true);
@@ -120,6 +184,28 @@ export function HomePage() {
       const bySlug = allCategories.find((c) => c.slug.toLowerCase() === label.toLowerCase());
       if (bySlug) return bySlug.slug;
       return toCategorySlug(label);
+    },
+    [allCategories]
+  );
+  const resolveCategorySlugCandidates = useCallback(
+    (label: string) => {
+      const raw = String(label || "").trim().toLowerCase();
+      if (!raw) return new Set<string>();
+      const baseSlug = toCategorySlug(raw);
+      const out = new Set<string>([baseSlug]);
+      for (const c of allCategories) {
+        const name = c.name.toLowerCase();
+        const slug = c.slug.toLowerCase();
+        const overlaps =
+          name === raw ||
+          slug === raw ||
+          name.includes(raw) ||
+          slug.includes(raw) ||
+          raw.includes(name) ||
+          raw.includes(slug);
+        if (overlaps) out.add(c.slug);
+      }
+      return out;
     },
     [allCategories]
   );
@@ -207,6 +293,141 @@ export function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
+    if (!user || !canUseInterestedSection) {
+      setBehaviorSignals(new Map());
+      setBehaviorTagScores(new Map());
+      setBehaviorCategoryScores(new Map());
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const fetchBehavior = async () => {
+      try {
+        const [historyRows, bookmarkRows] = await Promise.all([
+          getReadingHistory(),
+          getBookmarkedArticles(user.id),
+        ]);
+        if (cancelled) return;
+
+        const now = Date.now();
+        const historyEntries: BehaviorEntry[] = historyRows.map((row, idx) => {
+          const card = mapArticleToCard(row.article);
+          const viewedAtTs = new Date(row.viewed_at).getTime();
+          const daysAgo = Number.isFinite(viewedAtTs) ? Math.max(0, (now - viewedAtTs) / (1000 * 60 * 60 * 24)) : 7;
+          const recencyBoost = Math.max(0.5, 1.6 - daysAgo * 0.15);
+          const rankBoost = Math.max(0.7, 1.5 - idx * 0.08);
+          return { article: card, weight: recencyBoost * rankBoost };
+        });
+        const bookmarkEntries: BehaviorEntry[] = bookmarkRows.map((row) => ({
+          article: mapArticleToCard({
+            ...row,
+            category: null,
+          } as ArticleWithCategory),
+          // Bookmarks are explicit intent, so keep them high.
+          weight: 1.9,
+        }));
+        const allBehaviorEntries = [...historyEntries, ...bookmarkEntries];
+        setBehaviorSignals(inferBehaviorInterestScores(allBehaviorEntries));
+
+        // Generic profile for ALL topics: learn directly from consumed article tags/categories.
+        const nextTagScores = new Map<string, number>();
+        const nextCategoryScores = new Map<string, number>();
+        for (const entry of allBehaviorEntries) {
+          const article = entry.article;
+          const weight = Math.max(0, entry.weight);
+          const categorySlug = resolveCategorySlug(article.category);
+          nextCategoryScores.set(categorySlug, (nextCategoryScores.get(categorySlug) ?? 0) + weight * 1.4);
+          for (const rawTag of article.tags ?? []) {
+            const tag = String(rawTag).trim().toLowerCase();
+            if (!tag) continue;
+            nextTagScores.set(tag, (nextTagScores.get(tag) ?? 0) + weight * 2.2);
+          }
+        }
+        setBehaviorTagScores(nextTagScores);
+        setBehaviorCategoryScores(nextCategoryScores);
+      } catch {
+        if (!cancelled) {
+          setBehaviorSignals(new Map());
+          setBehaviorTagScores(new Map());
+          setBehaviorCategoryScores(new Map());
+        }
+      }
+    };
+
+    void fetchBehavior();
+    const intervalId = window.setInterval(() => {
+      void fetchBehavior();
+    }, 15000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void fetchBehavior();
+      }
+    };
+    window.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onVisibilityChange);
+    };
+  }, [canUseInterestedSection, resolveCategorySlug, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || !canUseInterestedSection) {
+      setMutedInterests([]);
+      return;
+    }
+    const key = `muted_interests:${user.id}`;
+    try {
+      const raw = window.localStorage.getItem(key);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      const list = Array.isArray(parsed)
+        ? parsed.map((x) => String(x).trim().toLowerCase()).filter(Boolean)
+        : [];
+      setMutedInterests(Array.from(new Set(list)));
+    } catch {
+      setMutedInterests([]);
+    }
+  }, [canUseInterestedSection, user?.id]);
+
+  const saveMutedInterests = useCallback(
+    (next: string[]) => {
+      if (!user?.id) return;
+      const key = `muted_interests:${user.id}`;
+      const cleaned = Array.from(new Set(next.map((x) => x.trim().toLowerCase()).filter(Boolean)));
+      setMutedInterests(cleaned);
+      try {
+        window.localStorage.setItem(key, JSON.stringify(cleaned));
+      } catch {
+        // Ignore storage failures; state still updates in-memory.
+      }
+    },
+    [user?.id]
+  );
+  const isMutedValue = useCallback(
+    (value: string) => {
+      const v = String(value || "").trim().toLowerCase();
+      if (!v) return false;
+      const variants = new Set<string>([
+        v,
+        v.replace(/\s+/g, "-"),
+        v.replace(/-/g, " "),
+      ]);
+      for (const m of mutedInterests) {
+        const mv = String(m || "").trim().toLowerCase();
+        if (!mv) continue;
+        if (variants.has(mv)) return true;
+      }
+      return false;
+    },
+    [mutedInterests]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
     if (!user) {
       setTrendingArticles([]);
       return () => {
@@ -289,7 +510,7 @@ export function HomePage() {
           .filter((article) => {
             const articleSlug = resolveCategorySlug(article.category);
             return user.interests!.some(
-              (interest) => resolveCategorySlug(interest) === articleSlug
+              (interest) => resolveCategorySlugCandidates(interest).has(articleSlug)
             );
           })
       : [];
@@ -324,9 +545,145 @@ export function HomePage() {
     publishedAt: article.publishedAt ?? null,
   }));
 
+  const interestedArticles = useMemo(() => {
+    if (!user || !canUseInterestedSection) return [];
+    const interestedCategorySlugs = new Set<string>();
+    for (const x of user.interests ?? []) {
+      for (const slug of resolveCategorySlugCandidates(x)) interestedCategorySlugs.add(slug);
+    }
+    const inferredCategoryBoosts = new Map<string, number>();
+    for (const signal of INTEREST_SIGNAL_DICTIONARY) {
+      const score = behaviorSignals.get(signal.key) ?? 0;
+      if (score <= 0) continue;
+      for (const category of signal.categories) {
+        for (const slug of resolveCategorySlugCandidates(category)) {
+          inferredCategoryBoosts.set(slug, (inferredCategoryBoosts.get(slug) ?? 0) + score);
+        }
+      }
+    }
+
+    // If behavior strongly indicates a different category (e.g. reading many world articles),
+    // allow that category into recommendations even if it is not in profile interests.
+    const behaviorDrivenCategorySlugs = new Set(
+      Array.from(inferredCategoryBoosts.entries())
+        .filter(([, score]) => score >= 2.2)
+        .map(([slug]) => slug)
+    );
+
+    const withScore = dbArticles
+      .filter((article) => {
+        const articleSlug = resolveCategorySlug(article.category);
+        const articleTags = (article.tags ?? []).map((tag) => String(tag).toLowerCase());
+        const isMuted =
+          isMutedValue(articleSlug) ||
+          articleTags.some((tag) => isMutedValue(tag));
+        if (isMuted) return false;
+        const dynamicCategoryScore = behaviorCategoryScores.get(articleSlug) ?? 0;
+        const hasDynamicTagSignal = articleTags.some(
+          (tag) => (behaviorTagScores.get(String(tag).toLowerCase()) ?? 0) > 0.2
+        );
+        return (
+          interestedCategorySlugs.has(articleSlug) ||
+          behaviorDrivenCategorySlugs.has(articleSlug) ||
+          dynamicCategoryScore > 0.8 ||
+          hasDynamicTagSignal
+        );
+      })
+      .map((article) => {
+        const text = `${article.title} ${article.excerpt}`.toLowerCase();
+        const tagTokens = (article.tags ?? []).map((tag) => String(tag).toLowerCase());
+        const articleSlug = resolveCategorySlug(article.category);
+        let microInterestBoost = 0;
+        for (const [signal, signalScore] of behaviorSignals.entries()) {
+          const inText = text.includes(signal);
+          const inTags = tagTokens.some((tag) => tag === signal || tag.includes(signal));
+          if (inText || inTags) {
+            // Tag matches are stronger because they are explicit article metadata.
+            microInterestBoost += signalScore * (inTags ? 10 : 6);
+          }
+        }
+        const dynamicTagBoost = tagTokens.reduce(
+          (sum, tag) => sum + (behaviorTagScores.get(tag) ?? 0) * 4,
+          0
+        );
+        const dynamicCategoryBoost = (behaviorCategoryScores.get(articleSlug) ?? 0) * 8;
+        const categoryPreferenceBoost = interestedCategorySlugs.has(articleSlug) ? 3 : 0;
+        const categoryBehaviorBoost = (inferredCategoryBoosts.get(articleSlug) ?? 0) * 4;
+        const engagementScore = (article.views ?? 0) * 0.08 + (article.commentsCount ?? 0) * 0.35;
+        const recencyScore = Math.max(0, (article.publishedAtTs - (Date.now() - 1000 * 60 * 60 * 24 * 14)) / (1000 * 60 * 60 * 24));
+        const score =
+          microInterestBoost +
+          dynamicTagBoost +
+          dynamicCategoryBoost +
+          categoryPreferenceBoost +
+          categoryBehaviorBoost +
+          engagementScore +
+          recencyScore;
+        return { article, score };
+      })
+      .sort((a, b) => b.score - a.score)
+      .map((x) => x.article);
+
+    return withScore.slice(0, 8);
+  }, [
+    canUseInterestedSection,
+    behaviorCategoryScores,
+    behaviorSignals,
+    behaviorTagScores,
+    dbArticles,
+    isMutedValue,
+    mutedInterests,
+    resolveCategorySlug,
+    resolveCategorySlugCandidates,
+    user,
+  ]);
+  const interestedPageSize = 4;
+  const interestedPageCount = Math.max(1, Math.ceil(interestedArticles.length / interestedPageSize));
+  const interestedPages = Array.from({ length: interestedPageCount }, (_, index) =>
+    interestedArticles.slice(index * interestedPageSize, index * interestedPageSize + interestedPageSize)
+  );
+  const topBehaviorSignal = useMemo(() => {
+    let best: { key: string; score: number } | null = null;
+    for (const [key, score] of behaviorSignals.entries()) {
+      if (!best || score > best.score) best = { key, score };
+    }
+    return best?.key ?? null;
+  }, [behaviorSignals]);
+  const topBehaviorSignals = useMemo(
+    () =>
+      [...behaviorSignals.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([key]) => key)
+        .filter((key) => !isMutedValue(key)),
+    [behaviorSignals, isMutedValue]
+  );
+  const topBehaviorTags = useMemo(
+    () =>
+      [...behaviorTagScores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([tag]) => tag)
+        .filter((tag) => !isMutedValue(tag)),
+    [behaviorTagScores, isMutedValue]
+  );
+  const topBehaviorCategories = useMemo(
+    () =>
+      [...behaviorCategoryScores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([slug]) => slug)
+        .filter((slug) => !isMutedValue(slug)),
+    [behaviorCategoryScores, isMutedValue]
+  );
+
   useEffect(() => {
     setForYouPage((prev) => Math.min(prev, Math.max(0, forYouPageCount - 1)));
   }, [forYouPageCount]);
+
+  useEffect(() => {
+    setInterestedPage((prev) => Math.min(prev, Math.max(0, interestedPageCount - 1)));
+  }, [interestedPageCount]);
 
   return (
     <main className="container mx-auto px-4 py-8">
@@ -435,6 +792,111 @@ export function HomePage() {
                   ))}
                 </div>
               </div>
+            </section>
+          )}
+
+          {canUseInterestedSection && activeCategorySlug === "all" && interestedArticles.length > 0 && (
+            <section className="mb-10 border rounded-lg px-4 py-5 bg-white">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="text-xl font-semibold">You Might Be Interested</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Personalized from your recent reads, bookmarks, and tags
+                  </p>
+                  {(topBehaviorSignals.length > 0 ||
+                    topBehaviorTags.length > 0 ||
+                    topBehaviorCategories.length > 0) && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {topBehaviorSignals.map((signal) => (
+                        <button
+                          key={signal}
+                          type="button"
+                          onClick={() => saveMutedInterests([...mutedInterests, signal])}
+                          className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100"
+                          title={`Hide recommendations for ${signal}`}
+                        >
+                          {signal}
+                          <X className="h-3 w-3" />
+                        </button>
+                      ))}
+                      {topBehaviorTags.map((tag) => (
+                        <button
+                          key={`tag:${tag}`}
+                          type="button"
+                          onClick={() => saveMutedInterests([...mutedInterests, tag])}
+                          className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 hover:bg-emerald-100"
+                          title={`Hide recommendations with tag ${tag}`}
+                        >
+                          #{tag}
+                          <X className="h-3 w-3" />
+                        </button>
+                      ))}
+                      {topBehaviorCategories.map((slug) => (
+                        <button
+                          key={`cat:${slug}`}
+                          type="button"
+                          onClick={() => saveMutedInterests([...mutedInterests, slug])}
+                          className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700 hover:bg-amber-100"
+                          title={`Hide recommendations for category ${slug}`}
+                        >
+                          {slug}
+                          <X className="h-3 w-3" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setHideInterestedSection((prev) => !prev)}
+                    className="px-2.5 py-1 text-xs border rounded hover:bg-gray-50"
+                    aria-label={hideInterestedSection ? "Show recommendations section" : "Hide recommendations section"}
+                  >
+                    {hideInterestedSection ? "Show" : "Hide"}
+                  </button>
+                  {interestedArticles.length > interestedPageSize && !hideInterestedSection && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setInterestedPage((prev) => Math.max(0, prev - 1))}
+                        disabled={interestedPage === 0}
+                        className="p-1.5 border rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Previous personalized articles"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setInterestedPage((prev) => Math.min(interestedPageCount - 1, prev + 1))
+                        }
+                        disabled={interestedPage >= interestedPageCount - 1}
+                        className="p-1.5 border rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Next personalized articles"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {!hideInterestedSection && (
+                <div className="overflow-hidden">
+                  <div
+                    className="flex transition-transform duration-500 ease-out"
+                    style={{ transform: `translateX(-${interestedPage * 100}%)` }}
+                  >
+                    {interestedPages.map((pageArticles, pageIndex) => (
+                      <div key={pageIndex} className="min-w-full grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {pageArticles.map((article) => (
+                          <ArticleCard key={article.id} {...article} variant="compact" />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
@@ -623,6 +1085,7 @@ export function HomePage() {
                   </p>
                 )}
               </div>
+
               {!loading && !dbError && !isUnregisteredUser && sortedLatestArticles.length > latestPageSize && (
                 <div className="flex items-center justify-center gap-2 mb-8 flex-wrap">
                   <button
