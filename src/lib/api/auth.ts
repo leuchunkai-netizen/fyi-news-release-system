@@ -56,8 +56,80 @@ export async function syncPendingSignupInterestsFromMetadata(): Promise<boolean>
   }
 }
 
+/**
+ * Ensure a profile row exists after email verification/sign-in.
+ * This recovers signup details when initial profile insert was blocked by RLS.
+ */
+async function ensureProfileFromAuthMetadata(): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id || !user.email) return;
+
+  const { data: existing, error: existingError } = await supabase
+    .from("users")
+    .select("id,email_verified_at,gender,age,location")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  const verifiedAt = user.email_confirmed_at ?? null;
+  const meta = user.user_metadata ?? {};
+  const metaAge = typeof meta.signup_age === "number" && Number.isFinite(meta.signup_age) ? meta.signup_age : null;
+  const metaGender =
+    typeof meta.signup_gender === "string" && meta.signup_gender.trim().length > 0 ? meta.signup_gender : null;
+  const metaLocation =
+    typeof meta.signup_location === "string" && meta.signup_location.trim().length > 0
+      ? meta.signup_location
+      : null;
+
+  if (existing?.id) {
+    const needsVerification = !existing.email_verified_at && !!verifiedAt;
+    const needsGender = !existing.gender && !!metaGender;
+    const needsAge = (existing.age === null || existing.age === undefined) && metaAge !== null;
+    const needsLocation = !existing.location && !!metaLocation;
+
+    if (needsVerification || needsGender || needsAge || needsLocation) {
+      const updatePayload: {
+        email_verified_at?: string;
+        gender?: string;
+        age?: number;
+        location?: string;
+        updated_at: string;
+      } = {
+        updated_at: new Date().toISOString(),
+      };
+      if (needsVerification && verifiedAt) updatePayload.email_verified_at = verifiedAt;
+      if (needsGender && metaGender) updatePayload.gender = metaGender;
+      if (needsAge && metaAge !== null) updatePayload.age = metaAge;
+      if (needsLocation && metaLocation) updatePayload.location = metaLocation;
+
+      const { error: updateError } = await supabase
+        .from("users")
+        .update(updatePayload)
+        .eq("id", user.id);
+      if (updateError) throw updateError;
+    }
+    return;
+  }
+
+  const role: UserRole | undefined =
+    meta.signup_role === "free" || meta.signup_role === "premium" ? meta.signup_role : undefined;
+
+  await upsertUserProfile({
+    id: user.id,
+    email: user.email,
+    name: typeof meta.name === "string" && meta.name.trim().length > 0 ? meta.name : user.email.split("@")[0],
+    role: role ?? "free",
+    gender: metaGender,
+    age: metaAge,
+    location: metaLocation,
+    email_verified_at: verifiedAt,
+  });
+}
+
 /** Get current user profile plus interest names (for app context). */
 export async function getCurrentUserWithInterests(): Promise<{ profile: UserRow; interests: string[] } | null> {
+  await ensureProfileFromAuthMetadata();
   await syncPendingSignupInterestsFromMetadata();
   const profile = await getCurrentUserProfile();
   if (!profile) return null;
@@ -76,6 +148,7 @@ export async function upsertUserProfile(params: {
   gender?: string | null;
   age?: number | null;
   location?: string | null;
+  email_verified_at?: string | null;
 }) {
   const payload: {
     id: string;
@@ -86,6 +159,7 @@ export async function upsertUserProfile(params: {
     gender: string | null;
     age: number | null;
     location: string | null;
+    email_verified_at: string | null;
     updated_at: string;
   } = {
     id: params.id,
@@ -95,6 +169,7 @@ export async function upsertUserProfile(params: {
     gender: params.gender ?? null,
     age: params.age ?? null,
     location: params.location ?? null,
+    email_verified_at: params.email_verified_at ?? null,
     updated_at: new Date().toISOString(),
   };
 
@@ -130,6 +205,10 @@ export async function signUp(
     options: {
       data: {
         name,
+        ...(options?.gender ? { signup_gender: options.gender } : {}),
+        ...(typeof options?.age === "number" && Number.isFinite(options.age) ? { signup_age: options.age } : {}),
+        ...(options?.location ? { signup_location: options.location } : {}),
+        ...(options?.role ? { signup_role: options.role } : {}),
         ...(options?.interests?.length ? { signup_interests: [...options.interests] } : {}),
       },
       // Ensure Supabase/Resend email links redirect back into the SPA
@@ -150,6 +229,7 @@ export async function signUp(
         gender: options?.gender ?? null,
         age: options?.age ?? null,
         location: options?.location ?? null,
+        email_verified_at: authData.user.email_confirmed_at ?? null,
       });
       // Save interests only if we have a session (e.g. email confirmation off). Don't fail signup if this fails.
       if (options?.interests?.length) {
@@ -170,6 +250,26 @@ export async function signUp(
 /** Sign in with email/password. */
 export async function signIn(email: string, password: string) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+/** Send a password reset email with a link back to the app. */
+export async function sendPasswordResetEmail(email: string) {
+  const redirectTo =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/reset-password`
+      : undefined;
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/** Update password after user opens the password recovery link. */
+export async function updatePassword(password: string) {
+  const { data, error } = await supabase.auth.updateUser({ password });
   if (error) throw error;
   return data;
 }

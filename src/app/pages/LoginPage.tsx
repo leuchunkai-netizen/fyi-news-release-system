@@ -1,16 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useUser } from "../context/UserContext";
 import { signIn, getCurrentUserWithInterests, getAuthErrorMessage } from "@/lib/api/auth";
 
 export function LoginPage() {
+  const rememberedEmailKey = "fyi.rememberedEmail";
   const navigate = useNavigate();
   const { setUser } = useUser();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const remembered = window.localStorage.getItem(rememberedEmailKey);
+    if (remembered) {
+      setEmail(remembered);
+      setRememberMe(true);
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,6 +29,10 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await signIn(email, password);
+      if (typeof window !== "undefined") {
+        if (rememberMe) window.localStorage.setItem(rememberedEmailKey, email.trim());
+        else window.localStorage.removeItem(rememberedEmailKey);
+      }
       const data = await getCurrentUserWithInterests();
       if (data) {
         const nextUser = {
@@ -86,12 +101,17 @@ export function LoginPage() {
 
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2">
-                <input type="checkbox" className="rounded" />
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                />
                 <span className="text-sm">Remember me</span>
               </label>
-              <a href="#" className="text-sm text-red-600 hover:underline">
+              <Link to="/forgot-password" className="text-sm text-red-600 hover:underline">
                 Forgot password?
-              </a>
+              </Link>
             </div>
 
             <button

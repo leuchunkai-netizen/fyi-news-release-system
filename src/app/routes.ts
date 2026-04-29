@@ -3,6 +3,8 @@ import { Root } from "./Root";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { SubscriptionPage } from "./pages/SubscriptionPage";
 import { SubscriptionPaymentPage } from "./pages/SubscriptionPaymentPage";
 import { ArticleDetailPage } from "./pages/ArticleDetailPage";
@@ -27,6 +29,8 @@ export const router = createBrowserRouter([
     children: [
       { index: true, Component: HomePage },
       { path: "login", Component: LoginPage },
+      { path: "forgot-password", Component: ForgotPasswordPage },
+      { path: "reset-password", Component: ResetPasswordPage },
       { path: "signup", Component: SignupPage },
       { path: "verify-email", Component: EmailVerificationPage },
       { path: "subscription", Component: SubscriptionPage },
