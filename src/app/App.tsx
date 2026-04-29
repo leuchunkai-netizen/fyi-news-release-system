@@ -1,4 +1,5 @@
 import { RouterProvider } from "react-router";
+import { Toaster } from "sonner";
 import { UserProvider } from "./context/UserContext";
 import { GuestLandingProvider } from "./context/GuestLandingContext";
 import { TestimonialsProvider } from "./context/TestimonialsContext";
@@ -10,6 +11,7 @@ function App() {
       <GuestLandingProvider>
         <TestimonialsProvider>
           <RouterProvider router={router} />
+          <Toaster richColors position="top-right" />
         </TestimonialsProvider>
       </GuestLandingProvider>
     </UserProvider>
