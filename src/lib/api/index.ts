@@ -15,4 +15,3 @@ export * from "./submitReview";
 export * from "./expertApplications";
 export * from "./guestLanding";
 export * from "./testimonials";
-export * from "./payments";

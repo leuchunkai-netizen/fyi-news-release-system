@@ -9,7 +9,6 @@ const cors = require("cors");
 const { createApiLimiter } = require("./utils/rateLimiter");
 const articlesRouter = require("./routes/articles");
 const usersRouter = require("./routes/users");
-const paymentsRouter = require("./routes/payments");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -30,7 +29,6 @@ app.get("/api/health", (req, res) => {
 
 app.use("/api/articles", apiLimiter, articlesRouter);
 app.use("/api/users", apiLimiter, usersRouter);
-app.use("/api/payments", apiLimiter, paymentsRouter);
 
 app.use(express.static(distPath));
 

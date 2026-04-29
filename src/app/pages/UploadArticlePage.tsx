@@ -43,7 +43,7 @@ function estimateSourceDelta(rows: ClaimSourceVerifyResult[]) {
   const checks = Array.isArray(rows) ? rows : [];
   const supportHigh = checks.filter((r) => r.aiVerdict === "SUPPORT" && r.sourceCredibility === "HIGH").length;
   const supportLow = checks.filter((r) => r.aiVerdict === "SUPPORT" && r.sourceCredibility === "LOW").length;
-  return Math.min(15, supportHigh * 5) + Math.min(6, supportLow * 2);
+  return supportHigh * 5 + supportLow * 2;
 }
 
 function flattenChecksByClaim(allByClaim: Record<number, ClaimSourceVerifyResult[]>) {

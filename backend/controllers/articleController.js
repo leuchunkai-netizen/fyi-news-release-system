@@ -255,19 +255,11 @@ async function submitForReview(req, res) {
     const supportLow = checks.filter((c) => c?.aiVerdict === "SUPPORT" && c?.sourceCredibility === "LOW").length;
     const contradicts = checks.filter((c) => c?.aiVerdict === "CONTRADICT").length;
     // User source checks can only boost confidence; contradicting sources still affect verdict below, not the score.
-    let confidence = baseConfidence + Math.min(15, supportHigh * 5) + Math.min(6, supportLow * 2);
+    let confidence = baseConfidence + supportHigh * 5 + supportLow * 2;
     confidence = Math.max(0, Math.min(100, confidence));
-    const verifiedScoreThreshold = 75;
-    let verdict = baseVerdict;
-    if (contradicts > 0) {
-      verdict = "REJECTED";
-    } else if (confidence >= verifiedScoreThreshold) {
-      verdict = "VERIFIED";
-    } else if (supportHigh >= 2) {
-      verdict = "VERIFIED";
-    } else if ((supportHigh > 0 || supportLow > 0) && verdict === "REJECTED") {
-      verdict = "UNCERTAIN";
-    }
+    // Keep final verdict aligned with the final confidence score used for credibility_score.
+    // This avoids high-confidence drafts being downgraded by a second-pass verdict override.
+    const verdict = confidence >= minConf ? "VERIFIED" : "UNCERTAIN";
 
     const saveCred = await upsertCredibilityFromFactcheck(articleId, result, {
       userSourceChecks: checks,
@@ -278,7 +270,7 @@ async function submitForReview(req, res) {
 
     const verdictOk = allowedVerdicts.includes(verdict);
     const confidenceOk = confidence >= minConf;
-    const autoApproved = verdictOk && confidenceOk && verdict !== "REJECTED";
+    const autoApproved = verdictOk && confidenceOk;
 
     const score = Math.round(confidence);
 

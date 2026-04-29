@@ -109,7 +109,7 @@ export function BillingPage() {
                 to="/subscription/checkout?update=1"
                 className="block w-full px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm text-center"
               >
-                Update payment method
+                Manage subscription
               </Link>
               {user.role === "premium" ? (
                 <button

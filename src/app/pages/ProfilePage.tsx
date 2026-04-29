@@ -592,7 +592,7 @@ export function ProfilePage() {
                         to="/subscription/checkout?update=1"
                         className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm inline-block"
                       >
-                        Update payment method
+                        Manage subscription
                       </Link>
                       <button
                         type="button"

@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { Lock, ArrowLeft } from "lucide-react";
 import { useUser } from "../context/UserContext";
-import { getCurrentUserWithInterests } from "../../lib/api/auth";
-import { confirmStripeCheckout, createStripeCheckoutSession } from "../../lib/api/payments";
+import { getCurrentUserWithInterests, upgradeToPremium } from "../../lib/api/auth";
 
 function profileToUser(
   profile: {
@@ -31,6 +30,53 @@ function profileToUser(
   };
 }
 
+function digitsOnly(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+function formatCardNumber(value: string): string {
+  const digits = digitsOnly(value).slice(0, 19);
+  return digits.replace(/(.{4})/g, "$1 ").trim();
+}
+
+function isValidCardByLuhn(cardNumber: string): boolean {
+  const digits = digitsOnly(cardNumber);
+  if (digits.length < 12) return false;
+  let sum = 0;
+  let shouldDouble = false;
+  for (let i = digits.length - 1; i >= 0; i -= 1) {
+    let digit = Number(digits[i]);
+    if (Number.isNaN(digit)) return false;
+    if (shouldDouble) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    shouldDouble = !shouldDouble;
+  }
+  return sum % 10 === 0;
+}
+
+function formatExpiry(value: string): string {
+  const digits = digitsOnly(value).slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+}
+
+function isValidExpiry(expiry: string): boolean {
+  const match = expiry.match(/^(\d{2})\/(\d{2})$/);
+  if (!match) return false;
+  const month = Number(match[1]);
+  const year = Number(match[2]);
+  if (month < 1 || month > 12) return false;
+  const now = new Date();
+  const currentYear = now.getFullYear() % 100;
+  const currentMonth = now.getMonth() + 1;
+  if (year < currentYear) return false;
+  if (year === currentYear && month < currentMonth) return false;
+  return true;
+}
+
 export function SubscriptionPaymentPage() {
   const { user, setUser } = useUser();
   const navigate = useNavigate();
@@ -42,14 +88,13 @@ export function SubscriptionPaymentPage() {
     plan === "yearly" ? "Premium (Yearly) · $59.88/year (equiv. $4.99/month)" : "Premium · $9.99/month";
   const ctaLabel = plan === "yearly" ? "Subscribe — $59.88/year" : "Subscribe — $9.99/month";
   const [submitting, setSubmitting] = useState(false);
-  const [finalizing, setFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const checkoutSuccess = searchParams.get("checkout_success") === "1";
-  const checkoutCancelled = searchParams.get("checkout_cancelled") === "1";
-  const stripeSessionId = searchParams.get("session_id");
-  const isFinishing = checkoutSuccess && Boolean(stripeSessionId);
+  const [cardName, setCardName] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [expiry, setExpiry] = useState("");
+  const [cvc, setCvc] = useState("");
   const actionButtonLabel = useMemo(() => {
-    if (isUpdateMode) return "Update payment method in Stripe";
+    if (isUpdateMode) return "Confirm current plan";
     return ctaLabel;
   }, [isUpdateMode, ctaLabel]);
 
@@ -59,28 +104,6 @@ export function SubscriptionPaymentPage() {
       navigate("/subscription", { replace: true });
     }
   }, [isUpdateMode, navigate, user]);
-
-  useEffect(() => {
-    if (!user) return;
-    if (!isFinishing || !stripeSessionId || finalizing) return;
-
-    const run = async () => {
-      setError(null);
-      setFinalizing(true);
-      try {
-        await confirmStripeCheckout(stripeSessionId);
-        const data = await getCurrentUserWithInterests();
-        if (data) setUser(profileToUser(data.profile, data.interests));
-        navigate("/subscription?success=1", { replace: true });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unable to confirm your Stripe payment.");
-      } finally {
-        setFinalizing(false);
-      }
-    };
-
-    void run();
-  }, [finalizing, isFinishing, navigate, setUser, stripeSessionId, user]);
 
   if (!user) {
     return (
@@ -108,8 +131,8 @@ export function SubscriptionPaymentPage() {
           Go to Profile
         </Link>
         {" · "}
-        <Link to="/subscription/checkout?update=1" className="text-red-600 font-medium hover:underline">
-          Update payment method
+        <Link to="/billing" className="text-red-600 font-medium hover:underline">
+          Manage plan
         </Link>
       </div>
     );
@@ -120,12 +143,35 @@ export function SubscriptionPaymentPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!cardName.trim()) {
+      setError("Cardholder name is required.");
+      return;
+    }
+    if (!isValidCardByLuhn(cardNumber)) {
+      setError("Card number is invalid. Please check and try again.");
+      return;
+    }
+    if (!isValidExpiry(expiry)) {
+      setError("Expiry date is invalid or already expired.");
+      return;
+    }
+    const cvcDigits = digitsOnly(cvc);
+    if (cvcDigits.length < 3 || cvcDigits.length > 4) {
+      setError("CVC must be 3 or 4 digits.");
+      return;
+    }
     setSubmitting(true);
     try {
-      const checkoutUrl = await createStripeCheckoutSession(plan);
-      window.location.assign(checkoutUrl);
+      if (!isUpdateMode && user.role === "free") {
+        await upgradeToPremium(user.id);
+        const data = await getCurrentUserWithInterests();
+        if (data) setUser(profileToUser(data.profile, data.interests));
+        navigate("/subscription?success=1", { replace: true });
+      } else {
+        navigate("/billing", { replace: true });
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Payment failed. Please try again.");
+      setError(err instanceof Error ? err.message : "Could not update subscription. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -144,14 +190,14 @@ export function SubscriptionPaymentPage() {
       <div className="border rounded-xl shadow-sm overflow-hidden">
         <div className="bg-gray-50 border-b px-6 py-5">
           <h1 className="text-xl font-semibold mb-1">
-            {isUpdateMode ? "Update payment method" : "Complete your subscription"}
+            {isUpdateMode ? "Manage subscription" : "Complete your subscription"}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {isUpdateMode ? "Change the card we use for your Premium billing." : planLabel}
+            {isUpdateMode ? "Review your active membership and plan actions." : planLabel}
           </p>
           <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
             <Lock className="w-4 h-4" />
-            Secure payment with Stripe Checkout (test mode)
+            Premium is activated directly in-app (no external payment gateway).
           </div>
         </div>
 
@@ -161,28 +207,72 @@ export function SubscriptionPaymentPage() {
               {error}
             </div>
           )}
-          {checkoutCancelled && (
-            <div className="p-3 rounded-lg bg-amber-50 text-amber-800 text-sm border border-amber-200">
-              Stripe checkout was cancelled. No payment was made.
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">Cardholder name</label>
+              <input
+                type="text"
+                value={cardName}
+                onChange={(e) => setCardName(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder="Name on card"
+                autoComplete="cc-name"
+                required
+              />
             </div>
-          )}
-          {isFinishing && (
-            <div className="p-3 rounded-lg bg-blue-50 text-blue-800 text-sm border border-blue-200">
-              Confirming your Stripe payment...
+            <div>
+              <label className="block text-sm font-medium mb-1">Card number</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={cardNumber}
+                onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder="1234 5678 9012 3456"
+                autoComplete="cc-number"
+                required
+              />
             </div>
-          )}
-
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Expiry (MM/YY)</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={expiry}
+                  onChange={(e) => setExpiry(formatExpiry(e.target.value))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  placeholder="MM/YY"
+                  autoComplete="cc-exp"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">CVC</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={cvc}
+                  onChange={(e) => setCvc(digitsOnly(e.target.value).slice(0, 4))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  placeholder="123"
+                  autoComplete="cc-csc"
+                  required
+                />
+              </div>
+            </div>
+          </div>
           <button
             type="submit"
-            disabled={submitting || finalizing}
+            disabled={submitting}
             className="w-full py-3 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? "Redirecting to Stripe..." : finalizing ? "Finalizing..." : actionButtonLabel}
+            {submitting ? "Updating..." : actionButtonLabel}
           </button>
 
           <p className="text-xs text-muted-foreground text-center">
             {isUpdateMode
-              ? "You will be redirected to Stripe test checkout to update billing details."
+              ? "Use Billing to switch between Free and Premium."
               : "By subscribing you agree to our terms. You can cancel anytime from your profile."}
           </p>
         </form>

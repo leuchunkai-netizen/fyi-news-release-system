@@ -25,6 +25,24 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
+function isInvalidSessionError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? err.message
+      : typeof (err as { message?: unknown })?.message === "string"
+        ? String((err as { message: string }).message)
+        : "";
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("403") ||
+    lower.includes("forbidden") ||
+    lower.includes("invalid jwt") ||
+    lower.includes("jwt") ||
+    lower.includes("refresh token") ||
+    lower.includes("session")
+  );
+}
+
 function profileToUser(
   profile: {
     id: string;
@@ -65,8 +83,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
           if (data) setUser(profileToUser(data.profile, data.interests));
           else setUser(null);
         })
-        .catch(() => {
-          if (mounted) setUser(null);
+        .catch((err: unknown) => {
+          if (!mounted) return;
+          setUser(null);
+          // If the persisted session is stale/invalid, clear it once so
+          // Supabase stops retrying /auth/v1/user with a 403 token.
+          if (isInvalidSessionError(err)) {
+            void authSignOut().catch(() => {
+              /* ignore cleanup failures */
+            });
+          }
         })
         .finally(() => {
           if (mounted) setLoading(false);
