@@ -7,6 +7,8 @@
     "dev": "concurrently -n web,api -c cyan,magenta \"npm run dev:web\" \"npm run dev:api\"",
     "dev:web": "vite",
     "dev:api": "node backend/server.js",
+    "test": "node --test",
+    "test:ci": "npm run test && npm run build",
     "preview": "vite preview",
     "build": "vite build",
     "start": "node backend/server.js"
