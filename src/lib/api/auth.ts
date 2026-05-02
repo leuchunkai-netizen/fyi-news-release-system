@@ -1,15 +1,62 @@
 import { supabase } from "../supabase";
 import type { UserRow, UserRole } from "../types/database";
 
+/** Friendly copy when signup/email checks detect an existing account. */
+export const SIGNUP_EMAIL_ALREADY_REGISTERED_MESSAGE =
+  "This email is already registered. Sign in instead, or use a different email address.";
+
+function authErrorRawMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof (err as { message?: string })?.message === "string") return (err as { message: string }).message;
+  return "";
+}
+
+/** Detect duplicate-email signup errors from Supabase Auth / Postgres. */
+export function signupErrorIndicatesEmailTaken(err: unknown): boolean {
+  const raw = authErrorRawMessage(err);
+  const lower = raw.toLowerCase();
+  return (
+    lower.includes("user already registered") ||
+    lower.includes("already registered") ||
+    lower.includes("email address is already") ||
+    lower.includes("email has already") ||
+    lower.includes("already been registered") ||
+    lower.includes("duplicate key value") ||
+    lower.includes("users_email_key") ||
+    lower.includes("unique violation")
+  );
+}
+
+/**
+ * Whether `auth.users` already has this email (case-insensitive).
+ * Requires migration `20260502120000_signup_email_taken_rpc.sql` on the Supabase project.
+ * Returns null if the RPC is unavailable — caller should still rely on signUp() errors.
+ */
+export async function checkSignupEmailTaken(email: string): Promise<boolean | null> {
+  const candidate = email.trim();
+  if (!candidate) return null;
+  try {
+    const { data, error } = await supabase.rpc("is_signup_email_taken", {
+      candidate_email: candidate,
+    });
+    if (error) {
+      console.warn("[auth] is_signup_email_taken unavailable:", error.message);
+      return null;
+    }
+    return data === true;
+  } catch (e) {
+    console.warn("[auth] checkSignupEmailTaken:", e);
+    return null;
+  }
+}
+
 /** Turn Supabase auth errors into a short, user-friendly message (including rate limit). */
 export function getAuthErrorMessage(err: unknown, fallback: string): string {
-  const raw =
-    err instanceof Error
-      ? err.message
-      : typeof (err as { message?: string })?.message === "string"
-        ? (err as { message: string }).message
-        : "";
+  const raw = authErrorRawMessage(err);
   const lower = raw.toLowerCase();
+  if (signupErrorIndicatesEmailTaken(err)) {
+    return SIGNUP_EMAIL_ALREADY_REGISTERED_MESSAGE;
+  }
   if (lower.includes("rate limit") || lower.includes("rate_limit") || lower.includes("email rate limit exceeded")) {
     return "Too many emails sent. Please wait an hour and try again, or sign in if you already have an account.";
   }

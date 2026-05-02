@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useUser } from "../context/UserContext";
-import { signUp, getCurrentUserWithInterests, getAuthErrorMessage } from "@/lib/api/auth";
+import {
+  checkSignupEmailTaken,
+  getAuthErrorMessage,
+  getCurrentUserWithInterests,
+  signUp,
+  signupErrorIndicatesEmailTaken,
+  SIGNUP_EMAIL_ALREADY_REGISTERED_MESSAGE,
+} from "@/lib/api/auth";
 import { getCategories } from "../../lib/api/categories";
 import type { CategoryRow } from "../../lib/types/database";
 import { Check } from "lucide-react";
@@ -60,8 +67,24 @@ export function SignupPage() {
   const [cvc, setCvc] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
+  const [checkingSignupEmail, setCheckingSignupEmail] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+
+  const remindEmailTaken = () => {
+    setFieldErrors((prev) => ({
+      ...prev,
+      email: SIGNUP_EMAIL_ALREADY_REGISTERED_MESSAGE,
+    }));
+    setError("Please fix the highlighted fields below.");
+  };
+
+  async function gateEmailAvailableBeforeProceed(emailTrim: string): Promise<boolean> {
+    const taken = await checkSignupEmailTaken(emailTrim);
+    if (taken !== true) return true;
+    remindEmailTaken();
+    return false;
+  }
 
   const clearField = (key: FieldKey) => {
     setFieldErrors((prev) => {
@@ -182,6 +205,14 @@ export function SignupPage() {
 
     if (step === 1) {
       if (!validateStep1()) return;
+      const emailTrim = formData.email.trim();
+      setCheckingSignupEmail(true);
+      try {
+        const ok = await gateEmailAvailableBeforeProceed(emailTrim);
+        if (!ok) return;
+      } finally {
+        setCheckingSignupEmail(false);
+      }
       setFieldErrors({});
       setError(null);
       setStep(2);
@@ -200,10 +231,13 @@ export function SignupPage() {
         setStep(1);
         return;
       }
+      const emailTrim = formData.email.trim();
       const parsedAge = formData.age.trim() ? Number(formData.age) : null;
       setSubmitting(true);
       try {
-        await signUp(formData.email.trim(), formData.password, {
+        const available = await gateEmailAvailableBeforeProceed(emailTrim);
+        if (!available) return;
+        await signUp(emailTrim, formData.password, {
           name: formData.name.trim(),
           role: "free",
           interests,
@@ -229,9 +263,18 @@ export function SignupPage() {
         } catch {
           /* email confirm flow */
         }
-        navigate(`/verify-email?email=${encodeURIComponent(formData.email.trim())}`);
+        navigate(`/verify-email?email=${encodeURIComponent(emailTrim)}`);
       } catch (err: unknown) {
-        setError(getAuthErrorMessage(err, "Sign up failed. Please try again."));
+        const dup = signupErrorIndicatesEmailTaken(err);
+        const msg = getAuthErrorMessage(err, "Sign up failed. Please try again.");
+        if (dup) {
+          setFieldErrors((prev) => ({
+            ...prev,
+            email: SIGNUP_EMAIL_ALREADY_REGISTERED_MESSAGE,
+          }));
+          setStep(1);
+          setError("Please fix the highlighted fields below.");
+        } else setError(msg);
       } finally {
         setSubmitting(false);
       }
@@ -248,10 +291,13 @@ export function SignupPage() {
         setStep(1);
         return;
       }
+      const emailTrim = formData.email.trim();
       const parsedAge = formData.age.trim() ? Number(formData.age) : null;
       setSubmitting(true);
       try {
-        await signUp(formData.email.trim(), formData.password, {
+        const available = await gateEmailAvailableBeforeProceed(emailTrim);
+        if (!available) return;
+        await signUp(emailTrim, formData.password, {
           name: formData.name.trim(),
           role: "premium",
           interests,
@@ -277,9 +323,18 @@ export function SignupPage() {
         } catch {
           /* email confirm flow */
         }
-        navigate(`/verify-email?email=${encodeURIComponent(formData.email.trim())}`);
+        navigate(`/verify-email?email=${encodeURIComponent(emailTrim)}`);
       } catch (err: unknown) {
-        setError(getAuthErrorMessage(err, "Sign up failed. Please try again."));
+        const dup = signupErrorIndicatesEmailTaken(err);
+        const msg = getAuthErrorMessage(err, "Sign up failed. Please try again.");
+        if (dup) {
+          setFieldErrors((prev) => ({
+            ...prev,
+            email: SIGNUP_EMAIL_ALREADY_REGISTERED_MESSAGE,
+          }));
+          setStep(1);
+          setError("Please fix the highlighted fields below.");
+        } else setError(msg);
       } finally {
         setSubmitting(false);
       }
@@ -376,6 +431,19 @@ export function SignupPage() {
                       setFormData({ ...formData, email: e.target.value });
                       clearField("email");
                       if (error?.includes("highlighted")) setError(null);
+                    }}
+                    onBlur={() => {
+                      const emailTrim = formData.email.trim();
+                      if (!looksLikeEmail(emailTrim)) return;
+                      setCheckingSignupEmail(true);
+                      void (async () => {
+                        try {
+                          const taken = await checkSignupEmailTaken(emailTrim);
+                          if (taken === true) remindEmailTaken();
+                        } finally {
+                          setCheckingSignupEmail(false);
+                        }
+                      })();
                     }}
                     className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 ${inputErrorClass(Boolean(fieldErrors.email))}`}
                     placeholder="Enter your email"
@@ -712,11 +780,13 @@ export function SignupPage() {
               )}
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || checkingSignupEmail}
                 className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
               >
-                {submitting
-                  ? "Please wait…"
+                {submitting || checkingSignupEmail
+                  ? checkingSignupEmail && !submitting
+                    ? "Checking email…"
+                    : "Please wait…"
                   : step === 1
                     ? "Continue"
                     : step === 2 && accountType === "free"
