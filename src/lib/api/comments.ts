@@ -50,6 +50,13 @@ export async function getComments(articleId: string): Promise<CommentWithAuthor[
   }
 }
 
+function commentInsertErrorMessage(err: { message?: string; details?: string | null; hint?: string | null }): string {
+  const msg = (err.message ?? "").trim();
+  const details = (err.details ?? "").trim();
+  const hint = (err.hint ?? "").trim();
+  return [msg, details, hint].filter(Boolean).join(" — ") || "Could not post comment.";
+}
+
 /** Add comment (authenticated). One verification or several (one URL per line, all checked beforehand). */
 export async function addComment(
   articleId: string,
@@ -61,6 +68,7 @@ export async function addComment(
     article_id: articleId,
     user_id: userId,
     content,
+    status: "active" as const,
   };
   const list =
     sourceVerification == null
@@ -84,7 +92,7 @@ export async function addComment(
           source_references: list,
         };
   const { data, error } = await supabase.from("comments").insert(insert).select().single();
-  if (error) throw error;
+  if (error) throw new Error(commentInsertErrorMessage(error));
   return data as CommentRow;
 }
 

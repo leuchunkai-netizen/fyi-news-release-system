@@ -321,10 +321,12 @@ export async function updatePassword(password: string) {
   return data;
 }
 
-/** Sign out. */
+/** Sign out. Falls back to clearing only browser storage if the server rejects the session (e.g. invalid refresh token). */
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  if (!error) return;
+  const { error: localError } = await supabase.auth.signOut({ scope: "local" });
+  if (localError) throw error;
 }
 
 /** Get user by id (e.g. for display). */
