@@ -52,20 +52,24 @@ export function FeaturedStory({ stories, hideByline }: FeaturedStoryProps) {
 
   const currentStory = stories[currentIndex];
   const isBreakingVariant = !hideByline;
+  /** Logged-out intro slides: keep footprint smaller than hero / breaking cards */
+  const isIntroSlide = Boolean(hideByline);
 
   return (
-    <div className="relative">
+    <div className={`relative ${isIntroSlide ? "max-w-3xl mx-auto" : ""}`}>
       <article
         className={`relative bg-white ${
           isBreakingVariant
             ? "border border-gray-300 rounded-lg"
-            : "border-2 border-gray-300"
+            : isIntroSlide
+              ? "border border-gray-300 rounded-lg shadow-sm"
+              : "border-2 border-gray-300"
         }`}
       >
         {/* Image Placeholder */}
         <div
-          className={`bg-gray-200 flex items-center justify-center border-b-2 border-gray-300 ${
-            isBreakingVariant ? "aspect-[21/9]" : "aspect-[16/9]"
+          className={`bg-gray-200 flex items-center justify-center border-b border-gray-300 ${
+            isBreakingVariant || isIntroSlide ? "aspect-[21/9]" : "aspect-[16/9]"
           }`}
         >
           {currentStory.imageUrl ? (
@@ -83,24 +87,24 @@ export function FeaturedStory({ stories, hideByline }: FeaturedStoryProps) {
         </div>
         
         {/* Content Area */}
-        <div className={isBreakingVariant ? "p-4" : "p-6"}>
+        <div className={isBreakingVariant || isIntroSlide ? "p-4" : "p-6"}>
           <span
             className={`inline-block bg-black text-white font-bold uppercase mb-2 ${
-              isBreakingVariant ? "px-2 py-0.5 text-[10px]" : "px-3 py-1 text-xs"
+              isBreakingVariant || isIntroSlide ? "px-2 py-0.5 text-[10px]" : "px-3 py-1 text-xs"
             }`}
           >
             {currentStory.category}
           </span>
           <h2
             className={`font-bold mb-2 ${
-              isBreakingVariant ? "text-lg md:text-xl" : "text-2xl"
+              isBreakingVariant || isIntroSlide ? "text-lg md:text-xl" : "text-2xl"
             }`}
           >
             {currentStory.title}
           </h2>
           <p
             className={`text-gray-600 ${
-              isBreakingVariant ? "text-sm mb-3 line-clamp-2" : "mb-4"
+              isBreakingVariant || isIntroSlide ? "text-sm mb-3 line-clamp-2" : "mb-4"
             }`}
           >
             {currentStory.excerpt}

@@ -6,6 +6,39 @@ const { upsertCredibilityFromFactcheck } = require("../db/credibilityQueries");
 const { getSupabaseAdmin } = require("../db/supabaseClient");
 const { getUserFromBearer } = require("../utils/supabaseAuth");
 const { evaluateClaimAgainstSource, finalDecisionFromSignals } = require("../services/sourceVerification");
+const filters = require("../utils/filters");
+
+const MAX_SNAPSHOT_TOP3 = Math.max(12, Number(process.env.FACTCHECK_EVIDENCE_MAX || 8));
+
+/** Client replay of POST /api/articles/factcheck output — skips a second server pipeline run when body/title still match. */
+function isValidFactcheckSnapshot(snap) {
+  if (!snap || typeof snap !== "object") return false;
+  const fc = snap.fc;
+  if (!fc || typeof fc !== "object") return false;
+  if (!Array.isArray(fc.claims)) return false;
+  const conf = Number(fc.confidence);
+  if (!Number.isFinite(conf) || conf < 0 || conf > 100) return false;
+  const v = String(fc.verdict || "").toUpperCase();
+  if (!["VERIFIED", "UNCERTAIN", "REJECTED"].includes(v)) return false;
+  if (typeof fc.summary !== "string") return false;
+  if (!Array.isArray(snap.top3)) return false;
+  if (!Array.isArray(snap.claims)) return false;
+  return true;
+}
+
+function pipelineResultFromSnapshot(snap) {
+  const fc = { ...snap.fc };
+  if (!Array.isArray(fc.evidenceUsed) || fc.evidenceUsed.length === 0) {
+    fc.evidenceUsed = Array.isArray(snap.top3) ? snap.top3.slice(0, MAX_SNAPSHOT_TOP3) : [];
+  }
+  const top3 = Array.isArray(snap.top3) ? snap.top3.slice(0, MAX_SNAPSHOT_TOP3) : [];
+  return {
+    ok: true,
+    fc,
+    claims: snap.claims,
+    top3,
+  };
+}
 
 function tokenizeForRelevance(text) {
   return String(text || "")
@@ -213,7 +246,7 @@ async function submitForReview(req, res) {
 
     const { data: article, error: fetchErr } = await sb
       .from("articles")
-      .select("id, author_id, status")
+      .select("id, author_id, status, title, content")
       .eq("id", articleId)
       .maybeSingle();
 
@@ -223,12 +256,33 @@ async function submitForReview(req, res) {
       return res.status(403).json({ error: "You can only submit your own articles" });
     }
 
-    const result = await runFactcheckPipeline({ title, body });
-    if (!result.ok) {
-      return res.status(400).json({
-        error: result.error,
-        stage: result.stage,
-      });
+    const forceServerPipeline =
+      String(process.env.SUBMIT_FORCE_SERVER_PIPELINE || "").toLowerCase() === "true" ||
+      String(process.env.SUBMIT_FORCE_SERVER_PIPELINE || "") === "1";
+
+    const normBodySubmitted = filters.stripHtml(String(body || ""));
+    const normBodyStored = filters.stripHtml(String(article.content || ""));
+    const normTitleSubmitted =
+      title != null && String(title).trim() ? filters.stripHtml(String(title)) : "";
+    const normTitleStored = article.title ? filters.stripHtml(String(article.title)) : "";
+    const contentMatchesStored =
+      normBodySubmitted === normBodyStored && normTitleSubmitted === normTitleStored;
+
+    const factcheckSnapshot = req.body?.factcheckSnapshot;
+    let skippedServerPipeline = false;
+    let result;
+
+    if (!forceServerPipeline && contentMatchesStored && isValidFactcheckSnapshot(factcheckSnapshot)) {
+      result = pipelineResultFromSnapshot(factcheckSnapshot);
+      skippedServerPipeline = true;
+    } else {
+      result = await runFactcheckPipeline({ title, body });
+      if (!result.ok) {
+        return res.status(400).json({
+          error: result.error,
+          stage: result.stage,
+        });
+      }
     }
 
     const minConf = Number(process.env.AUTO_APPROVE_MIN_CONFIDENCE ?? 70);
@@ -307,6 +361,7 @@ async function submitForReview(req, res) {
       baseConfidence,
       serverBaseConfidence,
       usedClientPipelineConfidence: parsedClient != null,
+      skippedServerPipeline,
       minConfidence: minConf,
       allowedVerdicts,
       credibilitySaved: saveCred.ok,

@@ -10,6 +10,8 @@ export type FactcheckResult = {
   verdict: "VERIFIED" | "UNCERTAIN" | "REJECTED";
   summary: string;
   top3?: EvidenceItem[];
+  /** Evidence rows passed to the fact-check LLM (same as spread from server `fc`). */
+  evidenceUsed?: EvidenceItem[];
   claimsList?: Claim[];
   /** True when `articleId` was sent and Supabase upsert succeeded */
   credibilitySaved?: boolean;

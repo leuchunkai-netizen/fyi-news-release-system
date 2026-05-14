@@ -480,6 +480,20 @@ export function UploadArticlePage() {
             body: formData.content.trim() || "",
             pipelineConfidence:
               factcheckResult != null ? Math.round(Number(factcheckResult.confidence) || 0) : undefined,
+            factcheckSnapshot:
+              factcheckResult != null
+                ? {
+                    claims: factcheckResult.claimsList ?? [],
+                    top3: factcheckResult.top3 ?? [],
+                    fc: {
+                      claims: factcheckResult.claims ?? [],
+                      confidence: factcheckResult.confidence,
+                      verdict: factcheckResult.verdict,
+                      summary: factcheckResult.summary,
+                      evidenceUsed: factcheckResult.evidenceUsed ?? factcheckResult.top3 ?? [],
+                    },
+                  }
+                : undefined,
             userSourceChecks: checksForSubmit,
           });
           navigate("/my-articles", {

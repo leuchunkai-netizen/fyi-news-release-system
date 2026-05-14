@@ -1,6 +1,19 @@
 import { supabase } from "../supabase";
 import { apiUrl } from "./apiBase";
 
+/** Replay of last POST /api/articles/factcheck — enables fast submit when title/body unchanged. */
+export type FactcheckSnapshotForSubmit = {
+  claims: Array<{ claim?: string; q?: string }>;
+  top3: Array<{ title?: string; source?: string; desc?: string; forClaim?: string }>;
+  fc: {
+    claims: Array<{ claim: string; verdict: string; why?: string }>;
+    confidence: number;
+    verdict: string;
+    summary: string;
+    evidenceUsed?: Array<{ title?: string; source?: string; desc?: string; forClaim?: string }>;
+  };
+};
+
 export type SubmitReviewResult = {
   autoApproved: boolean;
   verdict: string;
@@ -11,6 +24,8 @@ export type SubmitReviewResult = {
   /** Second server-only pipeline run (can differ from the editor). */
   serverBaseConfidence?: number;
   usedClientPipelineConfidence?: boolean;
+  /** Server skipped claim/news/LLM pipeline and used `factcheckSnapshot` (same text as saved article). */
+  skippedServerPipeline?: boolean;
   minConfidence: number;
   allowedVerdicts: string[];
   credibilitySaved?: boolean;
@@ -58,6 +73,8 @@ export async function evaluateSubmitForReview(params: {
   body: string;
   /** From last Run fact check in the editor so saved score matches the preview (optional). */
   pipelineConfidence?: number;
+  /** When set with unchanged title/body vs DB, server skips a second pipeline run. */
+  factcheckSnapshot?: FactcheckSnapshotForSubmit;
   userSourceChecks?: Array<{
     claim?: string;
     sourceUrl?: string;
