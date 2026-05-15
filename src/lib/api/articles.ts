@@ -451,6 +451,12 @@ export async function getApprovedExpertProfileLabel(userId: string): Promise<str
   return "Verified expert";
 }
 
+/** True when an expert's approved expertise includes this category. */
+export async function canExpertReviewCategory(expertId: string, categoryId: string): Promise<boolean> {
+  const categoryIds = await getExpertApprovedCategoryIds(expertId);
+  return categoryIds.includes(categoryId);
+}
+
 export type ExpertDashboardArticle = {
   id: string;
   title: string;
@@ -461,6 +467,7 @@ export type ExpertDashboardArticle = {
   submitted_at: string | null;
   published_at: string | null;
   image_url: string | null;
+  category_id: string;
   category: { name: string } | null;
   status: ArticleStatus;
   /** This expert's latest recorded decision for this article, if any */
@@ -468,10 +475,11 @@ export type ExpertDashboardArticle = {
 };
 
 const expertDashboardArticleSelect =
-  "id, status, title, excerpt, author_display_name, created_at, updated_at, submitted_at, published_at, image_url, category:categories(name)";
+  "id, status, category_id, title, excerpt, author_display_name, created_at, updated_at, submitted_at, published_at, image_url, category:categories(name)";
 
 /**
- * Published articles in this expert's categories, plus rejected articles this expert reviewed (so they can edit/delete).
+ * Pending articles in this expert's categories (primary review queue), plus published articles
+ * in those categories and rejected articles this expert reviewed (so they can edit/delete).
  * Includes `myReviewDecision` when this expert has already submitted a review.
  */
 export async function getExpertDashboardArticles(expertId: string, limit = 200): Promise<ExpertDashboardArticle[]> {
@@ -491,6 +499,16 @@ export async function getExpertDashboardArticles(expertId: string, limit = 200):
   const byId = new Map<string, Row>();
 
   if (categoryIds.length > 0) {
+    const { data: pending, error: pendingErr } = await supabase
+      .from("articles")
+      .select(expertDashboardArticleSelect)
+      .eq("status", "pending")
+      .in("category_id", categoryIds)
+      .order("submitted_at", { ascending: false })
+      .limit(limit);
+    if (pendingErr) throw pendingErr;
+    for (const r of (pending ?? []) as Row[]) byId.set(r.id, r);
+
     const { data: pub, error } = await supabase
       .from("articles")
       .select(expertDashboardArticleSelect)
@@ -517,8 +535,19 @@ export async function getExpertDashboardArticles(expertId: string, limit = 200):
   if (byId.size === 0) return [];
 
   const rows = Array.from(byId.values()).sort((a, b) => {
-    const ta = new Date(a.published_at ?? a.submitted_at ?? a.created_at).getTime();
-    const tb = new Date(b.published_at ?? b.submitted_at ?? b.created_at).getTime();
+    const pendingFirst = (s: ArticleStatus) => (s === "pending" ? 0 : s === "published" ? 1 : 2);
+    const statusCmp = pendingFirst(a.status) - pendingFirst(b.status);
+    if (statusCmp !== 0) return statusCmp;
+    const ta = new Date(
+      a.status === "pending"
+        ? (a.submitted_at ?? a.created_at)
+        : (a.published_at ?? a.submitted_at ?? a.created_at),
+    ).getTime();
+    const tb = new Date(
+      b.status === "pending"
+        ? (b.submitted_at ?? b.created_at)
+        : (b.published_at ?? b.submitted_at ?? b.created_at),
+    ).getTime();
     return tb - ta;
   });
 
@@ -541,10 +570,10 @@ export async function getExpertDashboardArticles(expertId: string, limit = 200):
   }));
 }
 
-/** @deprecated Use getExpertDashboardArticles — kept for any external callers. */
+/** Pending articles in the expert's categories awaiting first review. */
 export async function getExpertPendingArticles(expertId: string) {
   const all = await getExpertDashboardArticles(expertId, 200);
-  return all.filter((a) => a.myReviewDecision !== "approved");
+  return all.filter((a) => a.status === "pending" && a.myReviewDecision == null);
 }
 
 /** Optional fields from verify-claim-source before expert_reviews upsert. */

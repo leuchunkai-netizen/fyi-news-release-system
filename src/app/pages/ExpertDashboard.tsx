@@ -43,7 +43,7 @@ export function ExpertDashboard() {
   const { user } = useUser();
   const location = useLocation();
   const [articles, setArticles] = useState<ExpertDashboardArticle[]>([]);
-  const [listFilter, setListFilter] = useState<"all" | "needs_review" | "reviewed">("all");
+  const [listFilter, setListFilter] = useState<"all" | "needs_review" | "reviewed">("needs_review");
   const [loading, setLoading] = useState(true);
   const [selectedArticle, setSelectedArticle] = useState<string | null>(null);
   const [reviewData, setReviewData] = useState({
@@ -103,9 +103,11 @@ export function ExpertDashboard() {
     }
   }, [reviewData.sourceUrls, reviewData.comments, reviewSourcePrecheck]);
 
+  const pendingQueue = articles.filter((a) => a.status === "pending" && a.myReviewDecision == null);
+
   const visibleArticles =
     listFilter === "needs_review"
-      ? articles.filter((a) => a.myReviewDecision !== "approved")
+      ? pendingQueue
       : listFilter === "reviewed"
         ? articles.filter((a) => a.myReviewDecision != null)
         : articles;
@@ -365,8 +367,8 @@ export function ExpertDashboard() {
         <div className="mb-8">
           <h1 className="text-3xl font-semibold mb-2">Expert Review Dashboard</h1>
           <p className="text-muted-foreground">
-            Only published articles in your declared areas of expertise appear here. Open the review form to approve or
-            reject (your latest review for each article is kept).
+            Articles waiting for review in your approved expertise categories appear here first. Open the review form to
+            approve or reject; your latest review for each article is kept.
           </p>
         </div>
 
@@ -377,15 +379,14 @@ export function ExpertDashboard() {
             onClick={() => setListFilter("all")}
             className={`px-3 py-1.5 rounded-lg text-sm border ${listFilter === "all" ? "bg-red-600 text-white border-red-600" : "bg-white hover:bg-gray-50"}`}
           >
-            In your expertise ({articles.length})
+            All ({articles.length})
           </button>
           <button
             type="button"
             onClick={() => setListFilter("needs_review")}
             className={`px-3 py-1.5 rounded-lg text-sm border ${listFilter === "needs_review" ? "bg-red-600 text-white border-red-600" : "bg-white hover:bg-gray-50"}`}
           >
-            Not yet reviewed by you (
-            {articles.filter((a) => a.myReviewDecision !== "approved").length})
+            Awaiting review ({pendingQueue.length})
           </button>
           <button
             type="button"
@@ -396,16 +397,26 @@ export function ExpertDashboard() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="border rounded-lg p-6">
-            <p className="text-sm text-muted-foreground mb-1">In list</p>
+            <p className="text-sm text-muted-foreground mb-1">Awaiting review</p>
+            <p className="text-3xl font-bold">{loading ? "—" : pendingQueue.length}</p>
+          </div>
+          <div className="border rounded-lg p-6">
+            <p className="text-sm text-muted-foreground mb-1">My reviews</p>
+            <p className="text-3xl font-bold">
+              {loading ? "—" : articles.filter((a) => a.myReviewDecision != null).length}
+            </p>
+          </div>
+          <div className="border rounded-lg p-6">
+            <p className="text-sm text-muted-foreground mb-1">Showing</p>
             <p className="text-3xl font-bold">{loading ? "—" : visibleArticles.length}</p>
           </div>
         </div>
 
         <div className="border rounded-lg">
           <div className="p-6 border-b">
-            <h2 className="text-xl font-semibold">Articles in your expertise</h2>
+            <h2 className="text-xl font-semibold">Expert review queue</h2>
           </div>
           {loading ? (
             <div className="p-8 text-center text-muted-foreground">Loading…</div>
@@ -446,7 +457,10 @@ export function ExpertDashboard() {
                             {article.myReviewDecision === "rejected" && (
                               <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-900">You rejected</span>
                             )}
-                            {article.myReviewDecision == null && (
+                            {article.status === "pending" && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-900">Under review</span>
+                            )}
+                            {article.myReviewDecision == null && article.status !== "pending" && (
                               <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700">No review from you yet</span>
                             )}
                             {article.status === "rejected" && (
@@ -460,9 +474,11 @@ export function ExpertDashboard() {
                             <span>By {article.author_display_name ?? "Unknown"}</span>
                             <span>
                               •{" "}
-                              {article.status === "rejected"
-                                ? `Rejected ${formatDate(article.updated_at ?? article.submitted_at ?? article.created_at)}`
-                                : `Published ${formatDate(article.published_at ?? article.submitted_at ?? article.created_at)}`}
+                              {article.status === "pending"
+                                ? `Submitted ${formatDate(article.submitted_at ?? article.created_at)}`
+                                : article.status === "rejected"
+                                  ? `Rejected ${formatDate(article.updated_at ?? article.submitted_at ?? article.created_at)}`
+                                  : `Published ${formatDate(article.published_at ?? article.submitted_at ?? article.created_at)}`}
                             </span>
                           </div>
                           <p className="text-sm text-muted-foreground">{article.excerpt ?? ""}</p>
@@ -505,6 +521,25 @@ export function ExpertDashboard() {
                               {deletingArticleId === article.id ? "Removing…" : "Delete review"}
                             </button>
                           </>
+                        ) : article.status === "pending" ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (selectedArticle === article.id) {
+                                setSelectedArticle(null);
+                                clearReviewSourceCheck();
+                                setReviewData(emptyReview());
+                              } else {
+                                clearReviewSourceCheck();
+                                setReviewData(emptyReview());
+                                setSelectedArticle(article.id);
+                              }
+                            }}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm"
+                          >
+                            <Eye className="w-4 h-4" />
+                            {selectedArticle === article.id ? "Hide review form" : "Review & decide"}
+                          </button>
                         ) : (
                           <button
                             type="button"

@@ -4,6 +4,7 @@ import { Clock, Bookmark, Share2, Sparkles, Flag, CheckCircle, MessageCircle, Fa
 import { useUser } from "../context/UserContext";
 import {
   getArticleById,
+  canExpertReviewCategory,
   getCredibilityAnalysis,
   getPublishedExpertReviewForArticle,
   getRelatedArticles,
@@ -238,6 +239,7 @@ export function ArticleDetailPage() {
   const [commentReportSucceededId, setCommentReportSucceededId] = useState<string | null>(null);
   const [credibilityAnalysis, setCredibilityAnalysis] = useState<Awaited<ReturnType<typeof getCredibilityAnalysis>>>(null);
   const [relatedArticles, setRelatedArticles] = useState<ArticleWithCategory[]>([]);
+  const [expertCanReview, setExpertCanReview] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -342,6 +344,28 @@ export function ArticleDetailPage() {
       cancelled = true;
     };
   }, [id, article?.id, article?.status, article?.is_verified, article?.expert_reviewer_id]);
+
+  useEffect(() => {
+    if (!user || user.role !== "expert" || !article?.category_id) {
+      setExpertCanReview(false);
+      return;
+    }
+    if (article.status !== "pending" && article.status !== "rejected") {
+      setExpertCanReview(false);
+      return;
+    }
+    let cancelled = false;
+    canExpertReviewCategory(user.id, article.category_id)
+      .then((ok) => {
+        if (!cancelled) setExpertCanReview(ok);
+      })
+      .catch(() => {
+        if (!cancelled) setExpertCanReview(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.role, article?.id, article?.category_id, article?.status]);
 
   useEffect(() => {
     setShowAISummary(false);
@@ -566,10 +590,11 @@ export function ArticleDetailPage() {
   }
 
   // Non-published articles are hidden from regular readers.
-  // Exceptions: admins and authors can view their own pending/rejected articles.
+  // Exceptions: admins, authors, and experts in the article's category.
   const canViewUnpublished =
     user?.role === "admin" ||
-    ((article.status === "pending" || article.status === "rejected") && user?.id === article.author_id);
+    ((article.status === "pending" || article.status === "rejected") && user?.id === article.author_id) ||
+    (user?.role === "expert" && expertCanReview);
   if (article.status !== "published" && !canViewUnpublished) {
     return (
       <div className="container mx-auto px-4 py-16 text-center">
@@ -667,6 +692,20 @@ export function ArticleDetailPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-4xl mx-auto">
+        {article.status === "pending" && expertCanReview && (
+          <div className="mb-6 border border-amber-300 rounded-lg p-4 bg-amber-50 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-amber-900">
+              This article is awaiting expert review in your category. You can approve or reject it from your dashboard.
+            </p>
+            <Link
+              to="/expert-dashboard"
+              className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 shrink-0"
+            >
+              Open expert review
+            </Link>
+          </div>
+        )}
+
         {showWarning && primaryScore != null && (
           <div className="mb-6 border-2 border-red-300 rounded-lg p-4 bg-red-50">
             <div className="flex items-start gap-3">
